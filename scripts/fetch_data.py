@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""
+Fetch local plan consultation data from planning.data.gov.uk and write
+the two files the map reads:
+
+  data/lpas.geojson  Local planning authority boundaries (simplified),
+                     each tagged with the plans that cover it.
+  data/plans.json    Every local plan with its timetable events and
+                     consultation windows.
+
+Data sources (all Open Government Licence v3.0, Crown copyright):
+  local-plan                 one row per local plan
+  plan                       newer combined plan dataset (local, minerals, waste...)
+  local-plan-timetable       older timetable dataset (retired Jan 2026, still read)
+  plan-timetable             current timetable dataset
+  local-planning-authority   LPA boundaries, joined on GSS code
+
+Run:  python scripts/fetch_data.py
+Env:  PLANNING_API (default https://www.planning.data.gov.uk), OUT_DIR (default data)
+"""
+
+import json
+import os
+import re
+import sys
+import time
+from datetime import datetime, timezone
+
+import requests
+from shapely import wkt
+from shapely.geometry import mapping
+
+API = os.environ.get("PLANNING_API", "https://www.planning.data.gov.uk").rstrip("/")
+OUT_DIR = os.environ.get("OUT_DIR", "data")
+PAGE_SIZE = 500
+SIMPLIFY_TOLERANCE = 0.0015  # degrees, roughly 100 to 150 m; keeps the file small
+COORD_DP = 4
+
+session = requests.Session()
+session.headers["User-Agent"] = "local-plan-consultation-map (personal project; GitHub Actions)"
+
+
+# --------------------------------------------------------------------------
+# API helpers
+# --------------------------------------------------------------------------
+
+def fetch_dataset(dataset, fields=None):
+    """Return every entity in a dataset, following pagination. Missing datasets return []."""
+    rows, offset = [], 0
+    while True:
+        params = {"dataset": dataset, "limit": PAGE_SIZE, "offset": offset}
+        if fields:
+            params["field"] = fields
+        for attempt in range(4):
+            try:
+                r = session.get(f"{API}/entity.json", params=params, timeout=120)
+                if r.status_code == 404:
+                    print(f"  {dataset}: not found, skipping")
+                    return rows
+                r.raise_for_status()
+                payload = r.json()
+                break
+            except (requests.RequestException, ValueError) as exc:
+                if attempt == 3:
+                    print(f"  {dataset}: giving up after errors ({exc})")
+                    return rows
+                time.sleep(2 ** attempt * 3)
+        batch = payload.get("entities", [])
+        rows.extend(batch)
+        if len(batch) < PAGE_SIZE:
+            break
+        offset += PAGE_SIZE
+        time.sleep(0.5)  # be polite
+    print(f"  {dataset}: {len(rows)} records")
+    return rows
+
+
+def split_list(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [v.strip() for v in str(value).split(";") if v.strip()]
+
+
+def clean_date(value):
+    """Accept YYYY, YYYY-MM or YYYY-MM-DD (with or without time). Return (iso, precision) or (None, None)."""
+    if not value:
+        return None, None
+    s = str(value).strip()[:10]
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        return s, "day"
+    if re.fullmatch(r"\d{4}-\d{2}", s):
+        return s + "-01", "month"
+    if re.fullmatch(r"\d{4}", s):
+        return s + "-01-01", "year"
+    return None, None
+
+
+# --------------------------------------------------------------------------
+# Event labels
+# --------------------------------------------------------------------------
+
+EVENT_LABELS = {
+    # 2012 regulations (local-plan-timetable)
+    "timetable-published": "Timetable published",
+    "reg-18-draft-local-plan-published": "Reg 18 draft plan published",
+    "reg-18-public-consultation-start": "Reg 18 consultation opens",
+    "reg-18-public-consultation-end": "Reg 18 consultation closes",
+    "reg-19-publication-local-plan-published": "Reg 19 publication plan published",
+    "reg-19-public-consultation-start": "Reg 19 consultation opens",
+    "reg-19-public-consultation-end": "Reg 19 consultation closes",
+    "submit-plan-for-examination": "Submitted for examination",
+    "estimated-submit-plan-for-examination": "Submission for examination (estimate)",
+    "planning-inspectorate-examination-start": "Examination starts",
+    "planning-inspectorate-examination-end": "Examination ends",
+    "planning-inspectorate-found-sound": "Found sound",
+    "inspector-report-published": "Inspector's report published",
+    "plan-adopted": "Plan adopted",
+    "plan-withdrawn": "Plan withdrawn",
+    "plan-revoked": "Plan revoked",
+    # new system (plan-timetable)
+    "publish-notice-intention-commence": "Notice of intention to commence",
+    "scoping-consultation-start": "Scoping consultation opens",
+    "scoping-consultation-end": "Scoping consultation closes",
+    "gateway-1-self-assessment": "Gateway 1 self-assessment",
+    "plan-content-evidence-consultation-start": "Plan content and evidence consultation opens",
+    "plan-content-evidence-consultation-end": "Plan content and evidence consultation closes",
+    "gateway-2-advice-sought": "Gateway 2 advice sought",
+    "gateway-2-advice-published": "Gateway 2 advice published",
+    "proposed-plan-consultation-start": "Proposed plan consultation opens",
+    "proposed-plan-consultation-end": "Proposed plan consultation closes",
+    "gateway-3-advice-sought": "Gateway 3 advice sought",
+    "gateway-3-advice-published": "Gateway 3 advice published",
+    "gateway-3-further-advice-sought": "Gateway 3 further advice sought",
+    "gateway-3-further-advice-published": "Gateway 3 further advice published",
+    "examination-submitted": "Submitted for examination",
+    "examination-recommendations-published": "Examination recommendations published",
+    "main-modification-consultation-start": "Main modifications consultation opens",
+    "main-modification-consultation-end": "Main modifications consultation closes",
+    "examination-pause-start": "Examination paused",
+    "examination-pause-end": "Examination resumed",
+    "additional-consultation-start": "Additional consultation opens",
+    "additional-consultation-end": "Additional consultation closes",
+    "adopted": "Plan adopted",
+    "withdrawn": "Plan withdrawn",
+    "revoked": "Plan revoked",
+}
+
+STAGE_LABELS = {
+    "reg-18-public-consultation": "Reg 18 consultation",
+    "reg-19-public-consultation": "Reg 19 consultation",
+    "scoping-consultation": "Scoping consultation",
+    "plan-content-evidence-consultation": "Plan content and evidence consultation",
+    "proposed-plan-consultation": "Proposed plan consultation",
+    "main-modification-consultation": "Main modifications consultation",
+    "additional-consultation": "Additional consultation",
+}
+
+
+def label_for(code):
+    return EVENT_LABELS.get(code) or code.replace("-", " ").capitalize()
+
+
+CONSULT_RE = re.compile(r"^(?P<stage>.*consultation)-(?P<edge>start|end)$")
+
+
+# --------------------------------------------------------------------------
+# Build
+# --------------------------------------------------------------------------
+
+def build_events(timetable_rows):
+    """Group timetable rows by plan reference into normalised events."""
+    by_plan = {}
+    for row in timetable_rows:
+        plan_ref = row.get("plan") or row.get("local-plan")
+        code = row.get("plan-event") or row.get("local-plan-event")
+        if not plan_ref or not code:
+            continue
+        if row.get("end-date"):  # removed from timetable
+            continue
+
+        actual, aprec = clean_date(row.get("actual-date") or row.get("start-date"))
+        if actual:
+            date, precision, kind = actual, aprec, "actual"
+        else:
+            predicted, pprec = clean_date(
+                row.get("predicted-date")
+                or row.get("predicted-earliest-date")
+                or row.get("event-date")
+            )
+            if not predicted:
+                continue
+            # Older local-plan-timetable rows put the only date in event-date; treat past
+            # dates as having happened and future ones as predictions.
+            today = datetime.now(timezone.utc).date().isoformat()
+            if row.get("event-date") and not row.get("predicted-date") and not row.get("predicted-earliest-date") \
+                    and not code.startswith("estimated-") and predicted <= today:
+                kind = "actual"
+            else:
+                kind = "predicted"
+            date, precision = predicted, pprec
+
+        latest, _ = clean_date(row.get("predicted-latest-date"))
+        ev = {
+            "code": code,
+            "label": label_for(code),
+            "date": date,
+            "precision": precision,
+            "kind": kind,
+        }
+        if latest and kind == "predicted":
+            ev["latest"] = latest
+        notes = (row.get("notes") or "").strip()
+        if notes:
+            ev["notes"] = notes[:200]
+        url = row.get("documentation-url") or row.get("document-url")
+        if url:
+            ev["url"] = url
+        by_plan.setdefault(plan_ref, {})
+        # de-duplicate the same event code + date from both datasets
+        by_plan[plan_ref][(code, date)] = ev
+    return {k: sorted(v.values(), key=lambda e: e["date"]) for k, v in by_plan.items()}
+
+
+def pair_consultations(events):
+    """Turn *-consultation-start / *-consultation-end events into windows."""
+    starts, ends = {}, {}
+    for ev in events:
+        m = CONSULT_RE.match(ev["code"])
+        if not m:
+            continue
+        (starts if m["edge"] == "start" else ends).setdefault(m["stage"], []).append(ev)
+
+    windows = []
+    for stage, s_list in starts.items():
+        e_list = sorted(ends.get(stage, []), key=lambda e: e["date"])
+        for s in sorted(s_list, key=lambda e: e["date"]):
+            end = next((e for e in e_list if e["date"] >= s["date"]), None)
+            if end:
+                e_list.remove(end)
+            windows.append({
+                "stage": stage,
+                "label": STAGE_LABELS.get(stage) or stage.replace("-", " ").capitalize(),
+                "start": s["date"],
+                "end": end["date"] if end else None,
+                # an opened consultation with a future closing date is scheduled, not predicted
+                "predicted": s["kind"] == "predicted",
+                "precision": s["precision"],
+                "url": s.get("url") or (end or {}).get("url"),
+            })
+    # an end with no start (rare): keep it so the date is not lost
+    for stage, e_list in ends.items():
+        for e in e_list:
+            if stage not in starts:
+                windows.append({
+                    "stage": stage,
+                    "label": STAGE_LABELS.get(stage) or stage.replace("-", " ").capitalize(),
+                    "start": None, "end": e["date"],
+                    "predicted": e["kind"] == "predicted", "precision": e["precision"],
+                    "url": e.get("url"),
+                })
+    return sorted(windows, key=lambda w: w["start"] or w["end"])
+
+
+def main():
+    os.makedirs(OUT_DIR, exist_ok=True)
+    print(f"Fetching from {API}")
+
+    # Plans: merge the older local-plan dataset with the newer plan dataset
+    plans = {}
+    for row in fetch_dataset("local-plan") + [
+        r for r in fetch_dataset("plan")
+        if not r.get("datasets") or "local-plan" in split_list(r.get("datasets"))
+    ]:
+        ref = row.get("reference")
+        if not ref:
+            continue
+        p = plans.setdefault(ref, {"reference": ref})
+        for key, src in [
+            ("name", "name"), ("description", "description"),
+            ("documentation_url", "documentation-url"), ("document_url", "document-url"),
+            ("adopted", "start-date"), ("ended", "end-date"),
+            ("period_start", "period-start-date"), ("period_end", "period-end-date"),
+            ("required_housing", "required-housing"), ("process", "local-plan-process"),
+        ]:
+            if row.get(src) and not p.get(key):
+                p[key] = row[src]
+        p.setdefault("lpas", [])
+        for code in split_list(row.get("local-planning-authorities")):
+            if code not in p["lpas"]:
+                p["lpas"].append(code)
+        if row.get("adopted-date") and not p.get("adopted"):
+            p["adopted"] = row["adopted-date"]
+
+    # Timetables: read both the retired and the current dataset
+    timetable_rows = fetch_dataset("local-plan-timetable") + fetch_dataset("plan-timetable")
+    events_by_plan = build_events(timetable_rows)
+
+    for ref, p in plans.items():
+        evs = events_by_plan.get(ref, [])
+        p["events"] = evs
+        p["consultations"] = pair_consultations(evs)
+        if not p.get("name"):
+            p["name"] = ref.replace("-", " ").title()
+
+    orphan_refs = sorted(set(events_by_plan) - set(plans))
+    if orphan_refs:
+        print(f"  note: {len(orphan_refs)} timetable plan references have no matching plan record")
+
+    # Boundaries
+    lpa_rows = fetch_dataset("local-planning-authority")
+    plans_by_lpa = {}
+    for ref, p in plans.items():
+        if p.get("ended"):
+            continue
+        for code in p["lpas"]:
+            plans_by_lpa.setdefault(code, []).append(ref)
+
+    features = []
+    for row in lpa_rows:
+        code = row.get("reference")
+        geom_wkt = row.get("geometry")
+        if not code or not geom_wkt:
+            continue
+        try:
+            geom = wkt.loads(geom_wkt).simplify(SIMPLIFY_TOLERANCE, preserve_topology=True)
+        except Exception as exc:  # malformed geometry
+            print(f"  skipping {code}: {exc}")
+            continue
+        gj = mapping(geom)
+        gj = json.loads(json.dumps(gj), parse_float=lambda x: round(float(x), COORD_DP))
+        features.append({
+            "type": "Feature",
+            "properties": {
+                "code": code,
+                "name": row.get("name") or code,
+                "plans": plans_by_lpa.get(code, []),
+            },
+            "geometry": gj,
+        })
+
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(os.path.join(OUT_DIR, "lpas.geojson"), "w") as f:
+        json.dump({"type": "FeatureCollection", "features": features}, f, separators=(",", ":"))
+    with open(os.path.join(OUT_DIR, "plans.json"), "w") as f:
+        json.dump({
+            "generated": generated,
+            "source": API,
+            "counts": {
+                "plans": len(plans),
+                "plans_with_timetable": sum(1 for p in plans.values() if p["events"]),
+                "consultation_windows": sum(len(p["consultations"]) for p in plans.values()),
+                "lpas": len(features),
+            },
+            "plans": plans,
+        }, f, separators=(",", ":"))
+
+    print(f"Wrote {len(features)} boundaries and {len(plans)} plans to {OUT_DIR}/")
+    if not plans or not features:
+        print("WARNING: no plans or no boundaries were written", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

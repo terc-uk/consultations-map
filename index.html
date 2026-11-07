@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local plan consultations map</title>
+  <meta name="description" content="Map of local plan consultations and timetables in England, from planning.data.gov.uk">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Local plan consultations</h1>
+      <p class="sub">England, from the government's planning data platform</p>
+    </header>
+
+    <div class="controls">
+      <input id="search" type="search" placeholder="Search council or plan" aria-label="Search council or plan">
+      <label class="toggle"><input id="predicted" type="checkbox" checked> Include predicted dates</label>
+    </div>
+
+    <div class="legend" aria-label="Map key">
+      <span><i class="sw open"></i>Open now</span>
+      <span><i class="sw soon"></i>Opens within 6 months</span>
+      <span><i class="sw later"></i>Opens later</span>
+      <span><i class="sw recent"></i>Closed in last 12 months</span>
+      <span><i class="sw data"></i>Plan data, no recent consultation</span>
+      <span><i class="sw none"></i>No data published</span>
+    </div>
+
+    <div id="lists">
+      <p class="loading">Loading data...</p>
+    </div>
+
+    <footer>
+      <p id="meta"></p>
+      <p>Data: <a href="https://www.planning.data.gov.uk/dataset/local-plan">planning.data.gov.uk</a>,
+        Open Government Licence v3.0, &copy; Crown copyright and database right.
+        Coverage is incomplete: only some councils publish timetable data so far.
+        Always check dates on the council's own website.</p>
+    </footer>
+  </aside>
+
+  <main id="map" aria-label="Map of local planning authorities"></main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>
