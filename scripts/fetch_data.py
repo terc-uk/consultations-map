@@ -16,9 +16,12 @@ Data sources (all Open Government Licence v3.0, Crown copyright):
   local-planning-authority   LPA boundaries, joined on GSS code
 
 Run:  python scripts/fetch_data.py
-Env:  PLANNING_API (default https://www.planning.data.gov.uk), OUT_DIR (default data)
+Env:  PLANNING_FILES (default https://files.planning.data.gov.uk), PLANNING_API
+      (default https://www.planning.data.gov.uk), OUT_DIR (default data), FETCH_RETRIES (default 6)
 """
 
+import csv
+import io
 import json
 import os
 import re
@@ -31,48 +34,88 @@ from shapely import wkt
 from shapely.geometry import mapping
 
 API = os.environ.get("PLANNING_API", "https://www.planning.data.gov.uk").rstrip("/")
+# Bulk downloads, served from a CDN. Same files as the "Download" links on each dataset page.
+FILES = os.environ.get("PLANNING_FILES", "https://files.planning.data.gov.uk").rstrip("/")
 OUT_DIR = os.environ.get("OUT_DIR", "data")
-PAGE_SIZE = 500
+PAGE_SIZE = 100
 SIMPLIFY_TOLERANCE = 0.0015  # degrees, roughly 100 to 150 m; keeps the file small
 COORD_DP = 4
+RETRIES = int(os.environ.get("FETCH_RETRIES", 6))  # waits of 5, 10, 20, 40, 60 s between attempts
 
 session = requests.Session()
-session.headers["User-Agent"] = "local-plan-consultation-map (personal project; GitHub Actions)"
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (compatible; local-plan-consultation-map/1.0; +https://github.com/terc-uk/local-plan-map)",
+    "Accept": "application/json, text/csv;q=0.9, */*;q=0.8",
+})
+csv.field_size_limit(sys.maxsize)  # boundary geometries are long
+
+
+class NotFound(Exception):
+    pass
+
+
+def get(url, params=None, timeout=180):
+    """GET with retries on errors and 5xx/429. Raises NotFound on 404, RuntimeError when it gives up."""
+    last = None
+    for attempt in range(RETRIES):
+        try:
+            r = session.get(url, params=params, timeout=timeout)
+            if r.status_code == 404:
+                raise NotFound(url)
+            if r.status_code in (429, 500, 502, 503, 504):
+                last = f"HTTP {r.status_code}"
+            else:
+                r.raise_for_status()
+                return r
+        except NotFound:
+            raise
+        except requests.RequestException as exc:
+            last = str(exc)
+        if attempt < RETRIES - 1:
+            time.sleep(min(60, 5 * 2 ** attempt))
+    raise RuntimeError(f"{last} from {url}")
 
 
 # --------------------------------------------------------------------------
-# API helpers
+# Fetching
 # --------------------------------------------------------------------------
 
-def fetch_dataset(dataset, fields=None):
-    """Return every entity in a dataset, following pagination. Missing datasets return []."""
+def fetch_bulk_csv(dataset):
+    r = get(f"{FILES}/dataset/{dataset}.csv", timeout=300)
+    text = r.content.decode("utf-8-sig")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def fetch_api(dataset):
     rows, offset = [], 0
     while True:
         params = {"dataset": dataset, "limit": PAGE_SIZE, "offset": offset}
-        if fields:
-            params["field"] = fields
-        for attempt in range(4):
-            try:
-                r = session.get(f"{API}/entity.json", params=params, timeout=120)
-                if r.status_code == 404:
-                    print(f"  {dataset}: not found, skipping")
-                    return rows
-                r.raise_for_status()
-                payload = r.json()
-                break
-            except (requests.RequestException, ValueError) as exc:
-                if attempt == 3:
-                    print(f"  {dataset}: giving up after errors ({exc})")
-                    return rows
-                time.sleep(2 ** attempt * 3)
+        payload = get(f"{API}/entity.json", params=params).json()
         batch = payload.get("entities", [])
         rows.extend(batch)
         if len(batch) < PAGE_SIZE:
-            break
+            return rows
         offset += PAGE_SIZE
-        time.sleep(0.5)  # be polite
-    print(f"  {dataset}: {len(rows)} records")
-    return rows
+        time.sleep(1)  # be polite
+
+
+def fetch_dataset(dataset, required=False):
+    """Try the bulk CSV download first, then the paged API. Missing optional datasets return []."""
+    errors = []
+    for name, fn in (("bulk download", fetch_bulk_csv), ("API", fetch_api)):
+        try:
+            rows = fn(dataset)
+            print(f"  {dataset}: {len(rows)} records via {name}")
+            return rows
+        except NotFound:
+            errors.append(f"{name}: not found")
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+    msg = f"  {dataset}: could not fetch ({'; '.join(errors)})"
+    if required:
+        raise SystemExit(msg + "\nStopping without changing the existing data files.")
+    print(msg)
+    return []
 
 
 def split_list(value):
@@ -264,12 +307,11 @@ def pair_consultations(events):
 
 
 def main():
-    os.makedirs(OUT_DIR, exist_ok=True)
-    print(f"Fetching from {API}")
+    print(f"Fetching from {FILES} (bulk downloads), falling back to {API}")
 
     # Plans: merge the older local-plan dataset with the newer plan dataset
     plans = {}
-    for row in fetch_dataset("local-plan") + [
+    for row in fetch_dataset("local-plan", required=True) + [
         r for r in fetch_dataset("plan")
         if not r.get("datasets") or "local-plan" in split_list(r.get("datasets"))
     ]:
@@ -295,6 +337,8 @@ def main():
 
     # Timetables: read both the retired and the current dataset
     timetable_rows = fetch_dataset("local-plan-timetable") + fetch_dataset("plan-timetable")
+    if not timetable_rows:
+        raise SystemExit("No timetable data could be fetched.\nStopping without changing the existing data files.")
     events_by_plan = build_events(timetable_rows)
 
     for ref, p in plans.items():
@@ -309,7 +353,7 @@ def main():
         print(f"  note: {len(orphan_refs)} timetable plan references have no matching plan record")
 
     # Boundaries
-    lpa_rows = fetch_dataset("local-planning-authority")
+    lpa_rows = fetch_dataset("local-planning-authority", required=True)
     plans_by_lpa = {}
     for ref, p in plans.items():
         if p.get("ended"):
@@ -321,7 +365,7 @@ def main():
     for row in lpa_rows:
         code = row.get("reference")
         geom_wkt = row.get("geometry")
-        if not code or not geom_wkt:
+        if not code or not geom_wkt or row.get("end-date"):
             continue
         try:
             geom = wkt.loads(geom_wkt).simplify(SIMPLIFY_TOLERANCE, preserve_topology=True)
@@ -340,13 +384,16 @@ def main():
             "geometry": gj,
         })
 
+    if not plans or not features:
+        raise SystemExit("No plans or no boundaries were built.\nStopping without changing the existing data files.")
+
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    with open(os.path.join(OUT_DIR, "lpas.geojson"), "w") as f:
-        json.dump({"type": "FeatureCollection", "features": features}, f, separators=(",", ":"))
-    with open(os.path.join(OUT_DIR, "plans.json"), "w") as f:
-        json.dump({
+    os.makedirs(OUT_DIR, exist_ok=True)
+    outputs = {
+        "lpas.geojson": {"type": "FeatureCollection", "features": features},
+        "plans.json": {
             "generated": generated,
-            "source": API,
+            "source": "planning.data.gov.uk",
             "counts": {
                 "plans": len(plans),
                 "plans_with_timetable": sum(1 for p in plans.values() if p["events"]),
@@ -354,13 +401,17 @@ def main():
                 "lpas": len(features),
             },
             "plans": plans,
-        }, f, separators=(",", ":"))
+        },
+    }
+    # write to temporary files first so a crash never leaves half-written data
+    for name, obj in outputs.items():
+        tmp = os.path.join(OUT_DIR, name + ".tmp")
+        with open(tmp, "w") as f:
+            json.dump(obj, f, separators=(",", ":"))
+    for name in outputs:
+        os.replace(os.path.join(OUT_DIR, name + ".tmp"), os.path.join(OUT_DIR, name))
 
     print(f"Wrote {len(features)} boundaries and {len(plans)} plans to {OUT_DIR}/")
-    if not plans or not features:
-        print("WARNING: no plans or no boundaries were written", file=sys.stderr)
-        sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
