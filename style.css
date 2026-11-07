@@ -6,11 +6,13 @@
   --panel: #f7f8f9;
   --accent: #0b5cad;
 
-  --c-open: #d9480f;
-  --c-soon: #f59f00;
-  --c-later: #ffd96a;
-  --c-recent: #7c93b3;
-  --c-data: #d5dbe1;
+  /* Colour-blind safe: orange vs blue hues, with lightness separating soon/later
+     and the two greys. Checked for protan/deutan/tritan separation. */
+  --c-open: #d55e00;   /* orange */
+  --c-soon: #1f4e9a;   /* dark blue */
+  --c-later: #7fb5e3;  /* light blue */
+  --c-recent: #7d838c; /* mid grey */
+  --c-data: #e6e9ec;   /* pale grey */
   --c-none: #ffffff;
 }
 
@@ -54,7 +56,7 @@ h1 { font-size: 18px; margin: 0 0 2px; }
 }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #9aa5b1; flex: 0 0 14px; }
-.sw.open { background: var(--c-open); }
+.sw.open { background: var(--c-open); border: 2px solid #1f2933; }
 .sw.soon { background: var(--c-soon); }
 .sw.later { background: var(--c-later); }
 .sw.recent { background: var(--c-recent); }
@@ -88,10 +90,10 @@ h1 { font-size: 18px; margin: 0 0 2px; }
   display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px;
   background: #e7ebef; color: var(--muted); vertical-align: 1px; margin-left: 4px;
 }
-.badge.open { background: var(--c-open); color: #fff; }
-.badge.soon { background: var(--c-soon); color: #2b2100; }
-.badge.later { background: var(--c-later); color: #2b2100; }
-.badge.recent { background: var(--c-recent); color: #fff; }
+.badge.open { background: var(--c-open); color: #000; }
+.badge.soon { background: var(--c-soon); color: #fff; }
+.badge.later { background: var(--c-later); color: #1f2933; }
+.badge.recent { background: var(--c-recent); color: #000; }
 
 footer { padding: 12px 16px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); }
 footer p { margin: 0 0 6px; }

@@ -7,12 +7,16 @@ Each council area on the map is coloured by its most pressing consultation:
 
 | Colour | Meaning |
 |---|---|
-| Red-orange | Consultation open now |
-| Amber | Opens within 6 months |
-| Pale yellow | Opens later |
-| Blue-grey | Closed in the last 12 months |
-| Light grey | Plan data published, no recent consultation |
+| Orange, heavy outline | Consultation open now |
+| Dark blue | Opens within 6 months |
+| Light blue | Opens later |
+| Mid grey | Closed in the last 12 months |
+| Pale grey | Plan data published, no recent consultation |
 | White | No local plan data published yet |
+
+The colours are chosen to stay distinguishable with red-green colour blindness
+(protanopia and deuteranopia): they differ by hue on an orange-blue axis and by lightness,
+and open consultations also get a heavy outline so they never rely on colour alone.
 
 Click an area to see its plans, consultation windows and full timetable. The side panel lists
 consultations that are open now or opening in the next 12 months. Statuses are worked out in the

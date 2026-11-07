@@ -11,9 +11,10 @@
   const LIST_AHEAD_DAYS = 365;  // list upcoming consultations a year ahead
   const DEFAULT_LENGTH_DAYS = 42; // assumed length when no closing date is published
 
+  // Colour-blind safe palette (orange / dark blue / light blue / greys), matching style.css
   const COLOURS = {
-    open: "#d9480f", soon: "#f59f00", later: "#ffd96a",
-    recent: "#7c93b3", data: "#d5dbe1", none: "#ffffff",
+    open: "#d55e00", soon: "#1f4e9a", later: "#7fb5e3",
+    recent: "#7d838c", data: "#e6e9ec", none: "#ffffff",
   };
   const RANK = { open: 5, soon: 4, later: 3, recent: 2, data: 1, none: 0 };
 
@@ -106,9 +107,12 @@
 
   function style(feature) {
     const s = lpaStatus(feature);
+    // open consultations also get a heavy outline, so the key status never relies on colour alone
     return {
-      color: "#5b6672", weight: 0.6, opacity: 0.8,
-      fillColor: COLOURS[s], fillOpacity: s === "none" ? 0.15 : 0.6,
+      color: s === "open" ? "#1f2933" : "#5b6672",
+      weight: s === "open" ? 2.5 : 0.6,
+      opacity: s === "open" ? 1 : 0.8,
+      fillColor: COLOURS[s], fillOpacity: s === "none" ? 0.15 : 0.75,
     };
   }
 
