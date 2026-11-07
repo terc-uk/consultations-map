@@ -191,7 +191,7 @@
     if (st.s === "open") {
       const left = daysBetween(today, st.end);
       when = st.assumedEnd ? `Opened ${fmt(w.start, w.precision)}, closing date not given`
-        : `Closes ${fmt(w.end, w.precision)} (${left === 0 ? "today" : left + " days left"})`;
+        : `Closes ${fmt(w.end, w.precision)} (${left === 0 ? "today" : left === 1 ? "1 day left" : left + " days left"})`;
     } else {
       when = `Opens ${fmt(w.start, w.precision)}${w.end ? ", closes " + fmt(w.end, w.precision) : ""}`;
     }

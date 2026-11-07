@@ -153,7 +153,7 @@ EVENT_LABELS = {
     "reg-19-publication-local-plan-published": "Reg 19 publication plan published",
     "reg-19-public-consultation-start": "Reg 19 consultation opens",
     "reg-19-public-consultation-end": "Reg 19 consultation closes",
-    "submit-plan-for-examination": "Submitted for examination",
+    "submit-plan-for-examination": "Submission for examination",
     "estimated-submit-plan-for-examination": "Submission for examination (estimate)",
     "planning-inspectorate-examination-start": "Examination starts",
     "planning-inspectorate-examination-end": "Examination ends",
@@ -177,7 +177,7 @@ EVENT_LABELS = {
     "gateway-3-advice-published": "Gateway 3 advice published",
     "gateway-3-further-advice-sought": "Gateway 3 further advice sought",
     "gateway-3-further-advice-published": "Gateway 3 further advice published",
-    "examination-submitted": "Submitted for examination",
+    "examination-submitted": "Submission for examination",
     "examination-recommendations-published": "Examination recommendations published",
     "main-modification-consultation-start": "Main modifications consultation opens",
     "main-modification-consultation-end": "Main modifications consultation closes",
@@ -198,7 +198,28 @@ STAGE_LABELS = {
     "proposed-plan-consultation": "Proposed plan consultation",
     "main-modification-consultation": "Main modifications consultation",
     "additional-consultation": "Additional consultation",
+    "sea-scoping-report-consultation": "SEA scoping report consultation",
+    "sites-consultation": "Sites consultation",
 }
+
+
+# Non-standard codes seen in the live data, mapped to their standard equivalents
+CODE_ALIASES = {
+    "reg-18-consultation-start": "reg-18-public-consultation-start",
+    "reg-18-consultation-end": "reg-18-public-consultation-end",
+    "reg-19-consultation-start": "reg-19-public-consultation-start",
+    "reg-19-consultation-end": "reg-19-public-consultation-end",
+    "plan-adoption-date": "plan-adopted",
+}
+
+
+def normalise_code(raw):
+    """Return (code, estimated). 'estimated-' prefixes mark predicted dates."""
+    code = str(raw).strip().lower()
+    estimated = code.startswith("estimated-")
+    if estimated:
+        code = code[len("estimated-"):]
+    return CODE_ALIASES.get(code, code), estimated
 
 
 def label_for(code):
@@ -217,20 +238,23 @@ def build_events(timetable_rows):
     by_plan = {}
     for row in timetable_rows:
         plan_ref = row.get("plan") or row.get("local-plan")
-        code = row.get("plan-event") or row.get("local-plan-event")
-        if not plan_ref or not code:
+        raw_code = row.get("plan-event") or row.get("local-plan-event")
+        if not plan_ref or not raw_code:
             continue
+        code, estimated = normalise_code(raw_code)
         if row.get("end-date"):  # removed from timetable
             continue
 
         actual, aprec = clean_date(row.get("actual-date") or row.get("start-date"))
-        if actual:
+        if actual and not estimated:
             date, precision, kind = actual, aprec, "actual"
         else:
             predicted, pprec = clean_date(
                 row.get("predicted-date")
                 or row.get("predicted-earliest-date")
                 or row.get("event-date")
+                or row.get("start-date")
+                or row.get("actual-date")
             )
             if not predicted:
                 continue
@@ -238,7 +262,7 @@ def build_events(timetable_rows):
             # dates as having happened and future ones as predictions.
             today = datetime.now(timezone.utc).date().isoformat()
             if row.get("event-date") and not row.get("predicted-date") and not row.get("predicted-earliest-date") \
-                    and not code.startswith("estimated-") and predicted <= today:
+                    and not estimated and predicted <= today:
                 kind = "actual"
             else:
                 kind = "predicted"
