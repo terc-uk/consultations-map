@@ -44,17 +44,17 @@ W06000004,Denbighshire,Wales,council,https://www.sirddinbych.gov.uk/en/planning-
 W06000005,Flintshire,Wales,council,https://www.flintshire.gov.uk/en/Resident/Planning/Local-Development-Plan.aspx,plan_page,,
 W06000002,Gwynedd,Wales,council,https://gwynedd.llyw.cymru/en/Council/Strategies-and-policies/Environment-and-planning/Planning-policy/Joint-Local-Development-Plan/Cynllun-Datblygu-Lleol-ar-y-Cyd-diwygiedig/Gwynedd-Local-Development-Plan-the-new-Plan.aspx,plan_page,Separate Gwynedd plan in preparation to replace the joint plan with Anglesey,
 W06000001,Isle of Anglesey,Wales,council,https://www.anglesey.gov.wales/en/Residents/Planning-building-control-and-conservation/Planning-policy/Joint-Local-Planning-Policy/Replacement-Joint-Local-Development-Plan.aspx,plan_page,Separate Anglesey plan in preparation to replace the joint plan with Gwynedd,
-W06000024,Merthyr Tydfil,Wales,council,https://www.merthyr.gov.uk,council_homepage,,
+W06000024,Merthyr Tydfil,Wales,council,https://www.merthyr.gov.uk/resident/planning-and-building-control/second-replacement-local-development-plan-2026-2041/,plan_page,,
 W06000021,Monmouthshire,Wales,council,https://www.monmouthshire.gov.uk/planning-policy/local-development-plan-revision/,plan_page,,
 W06000012,Neath Port Talbot,Wales,council,https://www.npt.gov.uk,council_homepage,,
-W06000022,Newport,Wales,council,https://www.newport.gov.uk,council_homepage,,
-W06000009,Pembrokeshire,Wales,council,https://www.pembrokeshire.gov.uk,council_homepage,,
-W06000023,Powys,Wales,council,https://www.powys.gov.uk,council_homepage,,
-W06000016,Rhondda Cynon Taf,Wales,council,https://www.rctcbc.gov.uk,council_homepage,,
-W06000011,Swansea,Wales,council,https://www.swansea.gov.uk,council_homepage,,
+W06000022,Newport,Wales,council,https://www.newport.gov.uk/planning/planning-policy/replacement-local-development-plan,plan_page,,
+W06000009,Pembrokeshire,Wales,council,https://www.pembrokeshire.gov.uk/local-development-plan-review/submission,plan_page,,
+W06000023,Powys,Wales,council,https://en.powys.gov.uk/LDP,plan_page,,
+W06000016,Rhondda Cynon Taf,Wales,council,https://www.rctcbc.gov.uk/EN/Resident/PlanningandBuildingControl/RevisedLocalDevelopmentPlan20222037/RevisedLocalDevelopmentPlan20222037.aspx,plan_page,,
+W06000011,Swansea,Wales,council,https://www.swansea.gov.uk/article/21286/Replacement-Local-Development-Plan-RLDP-2023---2038,plan_page,,
 W06000020,Torfaen,Wales,council,https://www.torfaen.gov.uk/en/planning-and-building/planning-policy/replacement-local-development-plan,plan_page,Joint local development plan with Blaenau Gwent in preparation,
-W06000014,Vale of Glamorgan,Wales,council,https://www.valeofglamorgan.gov.uk,council_homepage,,
-W06000006,Wrexham,Wales,council,https://www.wrexham.gov.uk,council_homepage,,
-NP-ERYRI,Eryri National Park Authority,Wales,national_park,https://www.eryri.llyw.cymru,council_homepage,Separate planning authority with its own local development plan,W06000002;W06000003
-NP-PEMBS,Pembrokeshire Coast National Park Authority,Wales,national_park,https://www.pembrokeshirecoast.wales,council_homepage,Separate planning authority with its own local development plan,W06000009
-NP-BANNAU,Bannau Brycheiniog National Park Authority,Wales,national_park,https://www.bannaubrycheiniog.org,council_homepage,Separate planning authority with its own local development plan,W06000023;W06000021;W06000010;W06000016;W06000024;W06000019;W06000020
+W06000014,Vale of Glamorgan,Wales,council,https://www.valeofglamorgan.gov.uk/en/living/planning_and_building_control/Planning/planning_policy/RLDP/Replacement-Local-Development-Plan.aspx,plan_page,,
+W06000006,Wrexham,Wales,council,https://www.wrexham.gov.uk/service/planning-application-guidance/development-plans-and-other-planning-policy,plan_page,Local development plan 2013-2028 was quashed by the High Court in 2025; the 2005 Unitary Development Plan applies,
+NP-ERYRI,Eryri National Park Authority,Wales,national_park,https://eryri.llyw.cymru,council_homepage,Separate planning authority with its own local development plan,W06000002;W06000003
+NP-PEMBS,Pembrokeshire Coast National Park Authority,Wales,national_park,https://www.pembrokeshirecoast.wales/planning/planning-policy/local-development-plan-3/,plan_page,Separate planning authority with its own local development plan,W06000009
+NP-BANNAU,Bannau Brycheiniog National Park Authority,Wales,national_park,https://bannaubrycheiniog.org,council_homepage,Separate planning authority with its own local development plan,W06000023;W06000021;W06000010;W06000016;W06000024;W06000019;W06000020
