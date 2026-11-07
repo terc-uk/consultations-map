@@ -22,6 +22,29 @@ Click an area to see its plans, consultation windows and full timetable. The sid
 consultations that are open now or opening in the next 12 months. Statuses are worked out in the
 browser from today's date, so they stay current between data refreshes.
 
+## Scotland and Wales
+
+There is no national dataset of local plan timetables for Scotland or Wales, so these areas
+are shown with a dashed outline and a link to each planning authority's local development plan
+page instead of consultation dates. National park authorities (Cairngorms, Loch Lomond and The
+Trossachs, Eryri, Pembrokeshire Coast, Bannau Brycheiniog) are listed in the popups of the council
+areas they overlap.
+
+The links live in `data/static/scotland-wales-plans.csv`, which you can edit directly on GitHub
+(open the file, click the pencil icon, change a link, commit). Columns:
+
+| Column | Meaning |
+|---|---|
+| `code` | Council area code used by the boundary file (do not change) |
+| `link` | URL to show |
+| `link_type` | `plan_page` for a local development plan page, `council_homepage` for a homepage placeholder |
+| `note` | Optional short note shown in the popup, e.g. joint plan arrangements |
+| `overlaps` | National parks only: council codes the park overlaps, separated by `;` |
+
+Rows marked `council_homepage` are placeholders waiting for a proper plan page link.
+Boundaries are in `data/static/scotland-wales-councils.geojson` (2013 council areas, simplified)
+and do not change with the daily data refresh.
+
 ## How it works
 
 ```
@@ -108,3 +131,5 @@ Opening `index.html` directly from the file system won't work, because browsers 
 
 Data: planning.data.gov.uk, Open Government Licence v3.0, © Crown copyright and database right.
 Map tiles: © OpenStreetMap contributors.
+Scotland and Wales boundaries: Martin Chorley, [UK-GeoJSON](https://github.com/martinjc/UK-GeoJSON)
+(CC BY 4.0). Contains Ordnance Survey data © Crown copyright and database right 2014.

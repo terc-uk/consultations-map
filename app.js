@@ -20,6 +20,7 @@
 
   const today = startOfDay(new Date());
   let plans = {}, lpaLayer, layersByCode = {}, includePredicted = true, query = "";
+  let devolved = [], devolvedLayer, devolvedLayersByCode = {};
 
   // ---------------------------------------------------------------- utils
   function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
@@ -96,6 +97,65 @@
     if (!query) return true;
     const hay = [plan.name, plan.reference, ...lpaNames(plan)].join(" ").toLowerCase();
     return hay.includes(query);
+  }
+
+  // ------------------------------------------------- Scotland and Wales
+  // No national timetable data exists for Scotland or Wales, so these areas
+  // show coverage and a link to each authority's plan page (or homepage).
+  // Edit data/static/scotland-wales-plans.csv to update links.
+
+  function parseCsv(text) {
+    const rows = []; let row = [], field = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (c === '"') q = false;
+        else field += c;
+      } else if (c === '"') q = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        if (row.some(v => v !== "")) rows.push(row);
+        row = [];
+      } else field += c;
+    }
+    row.push(field); if (row.some(v => v !== "")) rows.push(row);
+    const head = rows.shift() || [];
+    return rows.map(r => Object.fromEntries(head.map((h, i) => [h.trim(), (r[i] || "").trim()])));
+  }
+
+  const DEVOLVED_STYLE = {
+    color: "#5b6672", weight: 1, opacity: 0.9, dashArray: "4 3",
+    fillColor: "#f6f1e4", fillOpacity: 0.6,
+  };
+
+  function devolvedLinkHtml(row) {
+    const url = safeUrl(row.link);
+    if (!url) return `<div class="none">No link added yet.</div>`;
+    const site = row.authority_type === "national_park" ? "Authority website" : "Council website";
+    const label = row.link_type === "plan_page" ? "Local development plan page" : `${site} (plan page link not yet added)`;
+    return `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+  }
+
+  function devolvedPopupHtml(feature) {
+    const code = feature.properties.code;
+    const row = devolved.find(r => r.code === code) || { name: feature.properties.name };
+    const parks = devolved.filter(r => r.authority_type === "national_park" && (r.overlaps || "").split(";").includes(code));
+    let html = `<div class="pop"><h3>${esc(row.name || feature.properties.name)}</h3>`;
+    html += `<div class="facts">${esc(feature.properties.nation)}: plan links only. No national timetable data is published, so consultation dates are not shown.</div>`;
+    html += devolvedLinkHtml(row);
+    if (row.note) html += `<div class="facts" style="margin-top:6px">${esc(row.note)}</div>`;
+    for (const np of parks) {
+      html += `<div class="plan"><h4>${esc(np.name)}</h4><div class="facts">Part of this area is in the national park, which has its own local development plan.</div>${devolvedLinkHtml(np)}</div>`;
+    }
+    return html + `</div>`;
+  }
+
+  function devolvedMatches() {
+    if (!query) return [];
+    return devolved.filter(r => (r.name || "").toLowerCase().includes(query));
   }
 
   // ---------------------------------------------------------------- map
@@ -212,8 +272,18 @@
       (open.length ? open.map(r => itemHtml(r, all.indexOf(r))).join("") : `<p class="empty">None found.</p>`) +
       `<h2>Coming up in the next 12 months <span class="count">(${upcoming.length})</span></h2>` +
       (upcoming.length ? upcoming.map(r => itemHtml(r, all.indexOf(r))).join("") : `<p class="empty">None found.</p>`);
-    el.querySelectorAll(".item").forEach(btn => {
+    const dev = devolvedMatches();
+    if (dev.length) {
+      el.innerHTML += `<h2>Scotland and Wales <span class="count">(${dev.length})</span></h2>` +
+        dev.map((r, i) => `<button class="item devolved" data-dev="${i}">
+          <div class="who">${esc(r.name)}</div>
+          <div class="what">${esc(r.nation)}: plan links only, no timetable data</div></button>`).join("");
+    }
+    el.querySelectorAll(".item[data-idx]").forEach(btn => {
       btn.addEventListener("click", () => focusPlan(all[Number(btn.dataset.idx)].p));
+    });
+    el.querySelectorAll(".item[data-dev]").forEach(btn => {
+      btn.addEventListener("click", () => focusDevolved(dev[Number(btn.dataset.dev)]));
     });
   }
 
@@ -223,6 +293,16 @@
     const bounds = L.latLngBounds([]);
     layers.forEach(l => bounds.extend(l.getBounds()));
     map.fitBounds(bounds, { padding: [30, 30], maxZoom: 11 });
+    layers[0].openPopup(bounds.getCenter());
+  }
+
+  function focusDevolved(row) {
+    const codes = row.authority_type === "national_park" ? (row.overlaps || "").split(";") : [row.code];
+    const layers = codes.map(c => devolvedLayersByCode[c]).filter(Boolean);
+    if (!layers.length) return;
+    const bounds = L.latLngBounds([]);
+    layers.forEach(l => bounds.extend(l.getBounds()));
+    map.fitBounds(bounds, { padding: [30, 30], maxZoom: 10 });
     layers[0].openPopup(bounds.getCenter());
   }
 
@@ -261,6 +341,24 @@
       `<p class="error">Could not load the data files (${esc(err.message)}). ` +
       `If you have just set up the site, run the "Update local plan data" workflow in the Actions tab first.</p>`;
   });
+
+  Promise.all([
+    fetch("data/static/scotland-wales-councils.geojson").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    fetch("data/static/scotland-wales-plans.csv").then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }),
+  ]).then(([geo, csvText]) => {
+    devolved = parseCsv(csvText);
+    devolvedLayer = L.geoJSON(geo, {
+      style: () => DEVOLVED_STYLE,
+      onEachFeature(feature, layer) {
+        devolvedLayersByCode[feature.properties.code] = layer;
+        layer.bindPopup(() => devolvedPopupHtml(feature), { maxWidth: 340, maxHeight: 380 });
+        layer.bindTooltip(feature.properties.name, { sticky: true, direction: "top" });
+        layer.on("mouseover", () => layer.setStyle({ weight: 2, color: "#1f2933" }));
+        layer.on("mouseout", () => layer.setStyle(DEVOLVED_STYLE));
+      },
+    }).addTo(map);
+    if (query) renderLists();
+  }).catch(err => console.warn("Scotland and Wales layer not loaded:", err));
 
   document.getElementById("predicted").addEventListener("change", e => { includePredicted = e.target.checked; refresh(); });
   let t;

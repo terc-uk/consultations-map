@@ -62,6 +62,9 @@ h1 { font-size: 18px; margin: 0 0 2px; }
 .sw.recent { background: var(--c-recent); }
 .sw.data { background: var(--c-data); }
 .sw.none { background: var(--c-none); }
+.sw.devolved { background: #f6f1e4; border: 1.5px dashed #5b6672; }
+.legend .wide { grid-column: 1 / -1; }
+.item.devolved { border-left: 4px dashed #9aa5b1; }
 
 #lists { padding: 4px 0 8px; flex: 1; }
 #lists h2 {
