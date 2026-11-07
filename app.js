@@ -159,7 +159,8 @@
   }
 
   // ---------------------------------------------------------------- map
-  const map = L.map("map", { zoomSnap: 0.5, minZoom: 5 }).setView([52.8, -1.6], 6.5);
+  const map = L.map("map", { zoomSnap: 0.25, minZoom: 4.5 });
+  map.fitBounds([[49.9, -8.2], [60.9, 1.8]]);  // Great Britain
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 18,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
