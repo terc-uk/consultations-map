@@ -1,7 +1,8 @@
 # Local plan consultations map
 
 A map of local plan consultations and timetables in England, built from the government's
-[planning data platform](https://www.planning.data.gov.uk/dataset/local-plan).
+[planning data platform](https://www.planning.data.gov.uk/dataset/local-plan), with views for
+combined authority spatial development strategies and for national consultations across the UK.
 
 Each council area on the map is coloured by its most pressing consultation:
 
@@ -90,7 +91,67 @@ The Planning and Infrastructure Act 2025 makes SDSs a duty for strategic plannin
 26 November 2026, so most authorities have not yet published SDS timetables. The London Plan is
 London's SDS under the Greater London Authority Act 1999.
 
+## National consultations view
+
+The third button, **National**, lists consultations and calls for evidence from national bodies
+across the UK. You can link straight to it with `#view=national` (add `&show=all` to open the full
+list rather than the tERC selection). The data is collected every morning by
+`scripts/fetch_national.py` into `data/national.json`:
+
+| Source | Covers | Nation tag |
+|---|---|---|
+| GOV.UK search and content APIs | UK Government departments and agencies (consultations and calls for evidence) | UK, or the nations the page says it applies to (for example England) |
+| consult.gov.scot (Citizen Space API) | Scottish Government | Scotland |
+| yourviews.parliament.scot (Citizen Space API) | Scottish Parliament committees | Scotland |
+| gov.wales/consultations | Welsh Government | Wales |
+| northernireland.gov.uk/consultations | Northern Ireland Executive departments | Northern Ireland |
+| UK Parliament committees API | Commons and Lords committee calls for written evidence | UK |
+
+Senedd and Northern Ireland Assembly committee consultations are not included: their sites do not
+offer a feed the fetcher can read. Each run looks back 120 days for recently closed consultations
+and keeps anything it has seen before, so closed consultations stay listed for a year after they
+close (and for as long as tERC has them flagged). If one source fails, its earlier records are kept
+and the panel says which source was not refreshed. Consultations first seen in the last week are
+tagged "new".
+
+The list has three filters: **Relevant to tERC**, **All** and **Not relevant**. The map colours each
+nation by the consultations in the current filter that apply to it (UK-wide ones count for all
+four), using the same colours as the other views.
+
+### Marking consultations as relevant, and recording responses
+
+tERC's flags live in `data/static/national-terc.csv`. A consultation is relevant to tERC if it has
+a row in this file.
+
+| Column | Meaning |
+|---|---|
+| `id` | The consultation's web address without `https://` and `www.`, for example `gov.uk/government/consultations/founders-relief-technical-consultation` |
+| `title` | The consultation title, to make the file readable (not used for matching) |
+| `responded` | Optional. Date tERC sent its response, as `YYYY-MM-DD`. Shows the "✓ tERC responded" tag |
+| `link` | Optional. A public link to the response, if tERC publishes it |
+
+The easiest way to edit it is on the map itself:
+
+1. Create a token at GitHub > Settings > Developer settings > **Fine-grained personal access
+   tokens** > Generate new token. Set **Resource owner** to `terc-uk`, **Repository access** to
+   *Only select repositories* > `local-plan-map`, and under **Repository permissions** set
+   **Contents** to *Read and write*. Choose an expiry date. (An organisation owner may need to
+   approve tokens for `terc-uk`.)
+2. On the map, open **National**, choose **All**, click **Edit tERC flags** and paste the token.
+   Tick "Remember on this browser" only on your own computer.
+3. Tick **Relevant to tERC** on the consultations that matter. To record a response, fill in the
+   **Responded** date (this also marks it as relevant).
+4. Click **Save to GitHub**. This commits the changes to `national-terc.csv` in one go; the public
+   map shows them within a few minutes.
+
+The token stays in your browser and is only sent to api.github.com. You can also edit the CSV
+directly on GitHub like the other files. Everything in it is public, so do not add response text,
+internal notes or links to private documents.
+
 ## Consultations tERC has responded to
+
+This section covers local plans and spatial development strategies. National consultations use
+`national-terc.csv` instead (see above).
 
 When tERC responds to a consultation, add a row to `data/static/terc-responses.csv` (open it on
 GitHub, click the pencil icon, add a line, commit). The map then shows a "✓ tERC responded" tag
@@ -172,6 +233,7 @@ You need Python 3.
 pip install requests shapely
 python scripts/fetch_data.py         # writes data/plans.json and data/lpas.geojson
 python scripts/build_strategic_areas.py   # writes data/strategic-authorities.geojson
+python scripts/fetch_national.py     # writes data/national.json
 python -m http.server 8000           # then open http://localhost:8000
 ```
 
@@ -187,7 +249,6 @@ Opening `index.html` directly from the file system won't work, because browsers 
 
 ## Ideas for later
 
-- Add GOV.UK national consultations (the GOV.UK search API, filtered to `open_consultation`).
 - An RSS or email alert when a new consultation opens in chosen areas.
 - Extra layers from the platform: conservation areas, brownfield land, Article 4 directions.
 
@@ -197,3 +258,7 @@ Data: planning.data.gov.uk, Open Government Licence v3.0, © Crown copyright and
 Map tiles: © OpenStreetMap contributors.
 Scotland and Wales boundaries: Martin Chorley, [UK-GeoJSON](https://github.com/martinjc/UK-GeoJSON)
 (CC BY 4.0). Contains Ordnance Survey data © Crown copyright and database right 2014.
+Northern Ireland boundary (in `data/static/nations.geojson`, built once by `scripts/build_nations.py`):
+same source, contains LPS Intellectual Property © Crown copyright and database right 2016.
+National consultations: GOV.UK, gov.scot, gov.wales and northernireland.gov.uk content under the
+Open Government Licence v3.0; UK and Scottish Parliament content under the Open Parliament Licence.

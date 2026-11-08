@@ -4,11 +4,12 @@ on:
   schedule:
     - cron: "17 5 * * *"   # every day at 05:17 UTC
   workflow_dispatch: {}     # adds a "Run workflow" button in the Actions tab
-  push:                     # rebuild combined authority boundaries when their member list changes
+  push:                     # rebuild when the combined authority members or a fetch script change
     branches: [main]
     paths:
       - data/static/strategic-authorities.csv
       - scripts/build_strategic_areas.py
+      - scripts/fetch_national.py
 
 permissions:
   contents: write
@@ -32,27 +33,45 @@ jobs:
         run: pip install requests shapely
 
       - name: Fetch data from planning.data.gov.uk
+        id: local
+        continue-on-error: true
         run: python scripts/fetch_data.py
 
       - name: Build combined authority boundaries
+        if: steps.local.outcome == 'success'
         run: python scripts/build_strategic_areas.py
+
+      - name: Fetch national consultations
+        id: national
+        continue-on-error: true
+        run: python scripts/fetch_national.py
 
       - name: Commit if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Ignore the "generated" timestamp when deciding whether anything really changed
-          same_plans=false
-          if git cat-file -e HEAD:data/plans.json 2>/dev/null; then
-            if [ "$(git show HEAD:data/plans.json | jq -S 'del(.generated)')" = "$(jq -S 'del(.generated)' data/plans.json)" ]; then
-              same_plans=true
-            fi
-          fi
+          same() {
+            git cat-file -e "HEAD:$1" 2>/dev/null &&
+              [ "$(git show "HEAD:$1" | jq -S 'del(.generated)')" = "$(jq -S 'del(.generated)' "$1")" ]
+          }
+          changed=false
+          for f in data/plans.json data/national.json; do
+            if [ -f "$f" ] && ! same "$f"; then changed=true; fi
+          done
           git add data/
-          if $same_plans && git diff --cached --quiet -- data/lpas.geojson data/strategic-authorities.geojson; then
+          if ! git diff --cached --quiet -- data/lpas.geojson data/strategic-authorities.geojson; then changed=true; fi
+          if $changed; then
+            git commit -m "Update consultation data $(date -u +%Y-%m-%d)"
+            git push
+          else
             echo "No real change in the data. Skipping commit."
             git reset -q
-          else
-            git commit -m "Update local plan data $(date -u +%Y-%m-%d)"
-            git push
           fi
+
+      - name: Report a failed fetch
+        if: steps.local.outcome == 'failure' || steps.national.outcome == 'failure'
+        run: |
+          echo "Local plan fetch: ${{ steps.local.outcome }}. National consultations fetch: ${{ steps.national.outcome }}."
+          echo "Data from the steps that worked has been committed. See the step logs above."
+          exit 1
