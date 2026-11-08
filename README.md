@@ -90,6 +90,24 @@ The Planning and Infrastructure Act 2025 makes SDSs a duty for strategic plannin
 26 November 2026, so most authorities have not yet published SDS timetables. The London Plan is
 London's SDS under the Greater London Authority Act 1999.
 
+## Consultations tERC has responded to
+
+When tERC responds to a consultation, add a row to `data/static/terc-responses.csv` (open it on
+GitHub, click the pencil icon, add a line, commit). The map then shows a "✓ tERC responded" tag
+with the date next to that consultation, in the popup and in the side list.
+
+| Column | Meaning |
+|---|---|
+| `plan` | The plan reference, shown at the bottom of "Full timetable" in the area's popup (for example `city-of-york-council-new-local-plan`). For a spatial development strategy, use the authority `id` from `strategic-authorities.csv` |
+| `stage` | The consultation, either as shown on the map (for example `Scoping consultation`) or as a stage code (`scoping-consultation`). For SDS consultations use the `label` from `sds-consultations.csv` |
+| `start` | Optional. The consultation's opening date as `YYYY-MM-DD`, only needed if the same stage runs more than once for a plan |
+| `responded` | Date tERC sent its response, as `YYYY-MM-DD` |
+| `link` | Optional. A public link to the response, if tERC chooses to publish it. The tag becomes a link |
+
+This file is public, like everything else in the repository. Do not put response text, internal
+notes or links to private documents in it, and remember that removing something later does not
+remove it from the repository's history.
+
 ## How it works
 
 ```

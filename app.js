@@ -24,6 +24,8 @@
   // Combined authorities view: spatial development strategy (SDS) consultations
   let view = /(^|[#&])view=ca\b/.test(location.hash) ? "ca" : "lpa";
   let authorities = {}, caLayer, caLayersById = {}, lpaOutline, lpaGeo;
+  // Consultations tERC has responded to: data/static/terc-responses.csv (edit on GitHub)
+  let responses = [];
 
   // ---------------------------------------------------------------- utils
   function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
@@ -161,6 +163,25 @@
     return devolved.filter(r => (r.name || "").toLowerCase().includes(query));
   }
 
+  // ------------------------------------------------- tERC responses
+  // A row matches a consultation when its plan matches the plan reference (or the
+  // combined authority id), its stage matches the stage code or label (if given)
+  // and its start date matches (if given; only needed when a stage repeats).
+  function norm(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
+  function responseFor(ref, w) {
+    return responses.find(r => r.plan === ref &&
+      (!r.stage || norm(r.stage) === norm(w.stage) || norm(r.stage) === norm(w.label)) &&
+      (!r.start || r.start === w.start));
+  }
+  function respondedHtml(r) {
+    if (!r) return "";
+    const text = `\u2713 tERC responded${r.responded ? " " + fmt(r.responded) : ""}`;
+    const url = safeUrl(r.link);
+    return url
+      ? ` <a class="badge terc" href="${esc(url)}" target="_blank" rel="noopener">${esc(text)}</a>`
+      : ` <span class="badge terc">${esc(text)}</span>`;
+  }
+
   // ---------------------------------------------------------------- map
   const map = L.map("map", { zoomSnap: 0.25, minZoom: 4.5 });
   map.fitBounds([[49.9, -8.2], [60.9, 1.8]]);  // Great Britain
@@ -180,7 +201,7 @@
     };
   }
 
-  function windowLine(w) {
+  function windowLine(w, ref) {
     const st = windowStatus(w);
     if (!st && w.predicted && !includePredicted) return "";
     const badge = st && st.s !== "past" ? `<span class="badge ${st.s}">${{
@@ -193,7 +214,7 @@
     const note = w.note ? ` <span class="d">&middot; ${esc(w.note)}</span>` : "";
     const url = safeUrl(w.url);
     const label = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(w.label)}</a>` : esc(w.label);
-    return `<li>${label}${badge}<br><span class="d">${esc(span)}</span>${pred}${note}</li>`;
+    return `<li>${label}${badge}<br><span class="d">${esc(span)}</span>${pred}${note}${respondedHtml(responseFor(ref, w))}</li>`;
   }
 
   function popupHtml(feature) {
@@ -214,7 +235,7 @@
       if ((p.lpas || []).length > 1) facts.push(`Joint plan (${p.lpas.length} areas)`);
       if (facts.length) html += `<div class="facts">${facts.join(" &middot; ")}</div>`;
 
-      const lines = (p.consultations || []).map(windowLine).filter(Boolean);
+      const lines = (p.consultations || []).map(w => windowLine(w, ref)).filter(Boolean);
       html += lines.length
         ? `<ul>${lines.join("")}</ul>`
         : `<div class="none">No consultation dates published.</div>`;
@@ -225,7 +246,7 @@
           const pr = ev.kind === "predicted" ? ' class="pred"' : "";
           html += `<li${pr}><span class="d">${esc(fmt(ev.date, ev.precision))}</span><span>${esc(ev.label)}${ev.kind === "predicted" ? " (predicted)" : ""}${ev.notes ? ` <span class="d">${esc(ev.notes)}</span>` : ""}</span></li>`;
         }
-        html += `</ul></details>`;
+        html += `</ul><div class="ref">Plan reference: ${esc(ref)}</div></details>`;
       }
       html += `</div>`;
     }
@@ -269,13 +290,13 @@
     if (a.authority_type) html += `<div class="facts">${esc(a.authority_type)}</div>`;
     html += `<div class="plan"><h4>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(a.sds_name)}</a>` : esc(a.sds_name || "Spatial development strategy")}</h4>`;
     if (a.status) html += `<div class="facts">${esc(a.status)}</div>`;
-    const lines = sdsWindows(a, "sds").map(windowLine).filter(Boolean);
+    const lines = sdsWindows(a, "sds").map(w => windowLine(w, id)).filter(Boolean);
     if (lines.length) html += `<ul>${lines.join("")}</ul>`;
     else if (!a.status) html += `<div class="none">No SDS consultation dates published.</div>`;
     if (a.next_step) html += `<div class="facts" style="margin-top:6px"><strong>Next:</strong> ${esc(a.next_step)}</div>`;
     if (a.note) html += `<div class="facts">${esc(a.note)}</div>`;
     html += `</div>`;
-    const related = sdsWindows(a, "related").map(windowLine).filter(Boolean);
+    const related = sdsWindows(a, "related").map(w => windowLine(w, id)).filter(Boolean);
     if (related.length) html += `<div class="related-h">Related strategic plan</div><ul>${related.join("")}</ul>`;
     const names = feature.properties.member_names || [];
     if (names.length) {
@@ -304,7 +325,7 @@
     return `<button class="item ${st.s}${w.kind === "related" ? " related" : ""}" data-ca="${esc(a.id)}" data-idx="${idx}">
       <div class="who">${esc(a.name)}</div>
       <div class="what">${esc(w.label)}</div>
-      <div class="when">${esc(when)}</div></button>`;
+      <div class="when">${esc(when)}${respondedHtml(responseFor(a.id, w))}</div></button>`;
   }
 
   function renderCaLists(el) {
@@ -408,7 +429,7 @@
     return `<button class="item ${st.s}" data-idx="${idx}">
       <div class="who">${esc(whoText)}${w.predicted ? '<span class="badge">predicted</span>' : ""}</div>
       <div class="what">${esc(w.label)}: ${esc(p.name)}</div>
-      <div class="when">${esc(when)}</div></button>`;
+      <div class="when">${esc(when)}${respondedHtml(responseFor(p.reference, w))}</div></button>`;
   }
 
   function renderLists() {
@@ -557,6 +578,11 @@
     if (view === "ca") document.getElementById("lists").innerHTML =
       `<p class="error">Could not load the combined authority data (${esc(err.message)}).</p>`;
   });
+
+  fetch("data/static/terc-responses.csv")
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+    .then(text => { responses = parseCsv(text).filter(r => r.plan); renderLists(); })
+    .catch(err => console.warn("tERC responses not loaded:", err));
 
   document.querySelectorAll(".view-toggle button").forEach(btn => {
     btn.addEventListener("click", () => { if (btn.dataset.view !== view) setView(btn.dataset.view); });
