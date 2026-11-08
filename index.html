@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Local plan consultations map</title>
-  <meta name="description" content="Map of local plan consultations and timetables in England, from planning.data.gov.uk">
+  <title>Local plan and national consultations map</title>
+  <meta name="description" content="Map of local plan, spatial development strategy and national consultations across the UK">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="style.css">
@@ -12,33 +12,61 @@
 <body>
   <aside id="panel">
     <header>
-      <h1>Local plan consultations</h1>
-      <p class="sub">England from the government's planning data platform, plus plan links for Scotland and Wales</p>
+      <h1>Planning and policy consultations</h1>
+      <p class="sub">Local plans and spatial development strategies in England, plan links for Scotland and Wales, and national consultations across the UK</p>
     </header>
 
     <div class="controls">
       <div class="view-toggle" role="radiogroup" aria-label="Map view">
         <button type="button" role="radio" data-view="lpa" aria-checked="true">Local authorities</button>
         <button type="button" role="radio" data-view="ca" aria-checked="false">Combined authorities</button>
+        <button type="button" role="radio" data-view="nat" aria-checked="false">National</button>
       </div>
-      <p id="view-note" class="view-note" hidden>Spatial development strategy (SDS) consultations by combined, mayoral and strategic authorities.</p>
+      <p class="view-note ca-only" hidden>Spatial development strategy (SDS) consultations by combined, mayoral and strategic authorities.</p>
+      <p class="view-note nat-only" hidden>Consultations and calls for evidence from the UK, Scottish, Welsh and Northern Ireland governments and from UK and Scottish Parliament committees. <span id="nat-meta"></span></p>
+      <div class="filter-toggle nat-only" role="radiogroup" aria-label="Relevance to tERC" hidden>
+        <button type="button" role="radio" data-show="relevant" aria-checked="true">Relevant to tERC <span class="n"></span></button>
+        <button type="button" role="radio" data-show="all" aria-checked="false">All <span class="n"></span></button>
+        <button type="button" role="radio" data-show="not" aria-checked="false">Not relevant <span class="n"></span></button>
+      </div>
       <input id="search" type="search" placeholder="Search council or plan" aria-label="Search council or plan">
       <label class="toggle" id="predicted-toggle"><input id="predicted" type="checkbox" checked> Include predicted dates</label>
+      <div class="nat-only edit-entry" hidden>
+        <button type="button" id="edit-start" class="linkish">Edit tERC flags</button>
+        <form id="token-form" class="token-form" hidden>
+          <p>To tick consultations as relevant and record responses, paste a GitHub
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>
+            with access to <code>terc-uk/local-plan-map</code> only and <strong>Contents: Read and write</strong> permission.
+            Changes are saved to <code>data/static/national-terc.csv</code>, which is public.</p>
+          <input id="token" type="password" autocomplete="off" placeholder="github_pat_..." aria-label="GitHub token">
+          <label class="toggle"><input id="token-remember" type="checkbox"> Remember on this browser</label>
+          <div class="row"><button type="submit" class="btn">Start editing</button> <button type="button" id="token-cancel" class="linkish">Cancel</button></div>
+          <p id="token-error" class="error" hidden></p>
+        </form>
+      </div>
     </div>
 
     <div class="legend" aria-label="Map key">
-      <span><i class="sw open"></i><span data-lpa="Open now" data-ca="SDS consultation open">Open now</span></span>
+      <span><i class="sw open"></i><span data-lpa="Open now" data-ca="SDS consultation open" data-nat="Consultation open">Open now</span></span>
       <span><i class="sw soon"></i>Opens within 6 months</span>
       <span><i class="sw later"></i>Opens later</span>
       <span><i class="sw recent"></i>Closed in last 12 months</span>
-      <span><i class="sw data"></i><span data-lpa="Plan data, no recent consultation" data-ca="SDS in preparation, no recent consultation">Plan data, no recent consultation</span></span>
+      <span><i class="sw data"></i><span data-lpa="Plan data, no recent consultation" data-ca="SDS in preparation, no recent consultation" data-nat="None open or recent">Plan data, no recent consultation</span></span>
       <span class="lpa-only"><i class="sw none"></i>No data published</span>
       <span class="wide ca-only" hidden><i class="sw outline"></i>Council boundaries (areas outside a combined authority are unshaded)</span>
-      <span class="wide"><i class="sw devolved"></i>Scotland and Wales: plan links only (no national timetable data)</span>
+      <span class="wide not-nat"><i class="sw devolved"></i>Scotland and Wales: plan links only (no national timetable data)</span>
+      <span class="wide nat-only" hidden>Each nation is coloured by the consultations in the current list that apply to it. UK-wide consultations count for every nation.</span>
     </div>
 
     <div id="lists">
       <p class="loading">Loading data...</p>
+    </div>
+
+    <div id="save-bar" class="save-bar" hidden>
+      <span id="save-status"></span>
+      <button type="button" id="save-btn" class="btn">Save to GitHub</button>
+      <button type="button" id="discard-btn" class="linkish">Discard</button>
+      <button type="button" id="edit-stop" class="linkish">Stop editing</button>
     </div>
 
     <footer>
@@ -49,12 +77,16 @@
         Always check dates on the council's own website.</p>
       <p>Combined authority SDS dates are compiled by hand from authority websites and committee papers
         (last checked 8 November 2026). Boundaries are built from the council areas above.</p>
+      <p>National consultations are collected every morning from GOV.UK, consult.gov.scot, gov.wales,
+        northernireland.gov.uk and the UK and Scottish Parliament committee sites (Open Government Licence v3.0 and
+        Open Parliament Licence). Always check the closing date on the consultation page.</p>
       <p>Scotland and Wales boundaries: <a href="https://github.com/martinjc/UK-GeoJSON">Martin Chorley, UK-GeoJSON</a> (CC BY 4.0).
-        Contains Ordnance Survey data &copy; Crown copyright and database right 2014.</p>
+        Contains Ordnance Survey data &copy; Crown copyright and database right 2014.
+        Northern Ireland boundary from the same source: contains LPS Intellectual Property &copy; Crown copyright and database right 2016.</p>
     </footer>
   </aside>
 
-  <main id="map" aria-label="Map of local planning authorities"></main>
+  <main id="map" aria-label="Map of consultation areas"></main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>

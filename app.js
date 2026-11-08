@@ -21,8 +21,9 @@
   const today = startOfDay(new Date());
   let plans = {}, lpaLayer, layersByCode = {}, includePredicted = true, query = "";
   let devolved = [], devolvedLayer, devolvedLayersByCode = {};
-  // Combined authorities view: spatial development strategy (SDS) consultations
-  let view = /(^|[#&])view=ca\b/.test(location.hash) ? "ca" : "lpa";
+  // Views: "lpa" local plans, "ca" combined authorities (SDS), "nat" national consultations
+  let view = /(^|[#&])view=ca\b/.test(location.hash) ? "ca"
+    : /(^|[#&])view=national\b/.test(location.hash) ? "nat" : "lpa";
   let authorities = {}, caLayer, caLayersById = {}, lpaOutline, lpaGeo;
   // Consultations tERC has responded to: data/static/terc-responses.csv (edit on GitHub)
   let responses = [];
@@ -363,30 +364,360 @@
     layer.openPopup(layer.getBounds().getCenter());
   }
 
+  const SEARCH_LABELS = { lpa: "Search council or plan", ca: "Search authority or council", nat: "Search title, organisation or nation" };
+
   function setView(v) {
     view = v;
     document.querySelectorAll(".view-toggle button").forEach(b => b.setAttribute("aria-checked", String(b.dataset.view === v)));
-    document.querySelectorAll("[data-lpa]").forEach(s => { s.textContent = s.dataset[v === "ca" ? "ca" : "lpa"]; });
-    document.querySelectorAll(".lpa-only").forEach(s => { s.hidden = v === "ca"; });
+    document.querySelectorAll("[data-lpa]").forEach(s => { s.textContent = s.dataset[v] || s.dataset.lpa; });
+    document.querySelectorAll(".lpa-only").forEach(s => { s.hidden = v !== "lpa"; });
     document.querySelectorAll(".ca-only").forEach(s => { s.hidden = v !== "ca"; });
-    document.getElementById("view-note").hidden = v !== "ca";
-    document.getElementById("predicted-toggle").hidden = v === "ca";
+    document.querySelectorAll(".nat-only").forEach(s => { s.hidden = v !== "nat"; });
+    document.querySelectorAll(".not-nat").forEach(s => { s.hidden = v === "nat"; });
+    document.getElementById("predicted-toggle").hidden = v !== "lpa";
+    document.getElementById("save-bar").hidden = !(v === "nat" && editing);
     const search = document.getElementById("search");
-    search.placeholder = v === "ca" ? "Search authority or council" : "Search council or plan";
+    search.placeholder = SEARCH_LABELS[v];
     search.setAttribute("aria-label", search.placeholder);
     map.closePopup();
+    for (const layer of [lpaLayer, caLayer, lpaOutline, natLayer]) if (layer) map.removeLayer(layer);
     if (v === "ca") {
-      if (lpaLayer) map.removeLayer(lpaLayer);
       if (caLayer) caLayer.addTo(map);
       if (lpaOutline) lpaOutline.addTo(map);
-    } else {
-      if (caLayer) map.removeLayer(caLayer);
-      if (lpaOutline) map.removeLayer(lpaOutline);
-      if (lpaLayer) lpaLayer.addTo(map);
+    } else if (v === "nat") {
+      if (natLayer) natLayer.addTo(map);
+    } else if (lpaLayer) {
+      lpaLayer.addTo(map);
     }
-    if (devolvedLayer) devolvedLayer.bringToBack();
-    history.replaceState(null, "", v === "ca" ? "#view=ca" : location.pathname + location.search);
+    if (devolvedLayer) {
+      if (v === "nat") map.removeLayer(devolvedLayer);
+      else { devolvedLayer.addTo(map); devolvedLayer.bringToBack(); }
+    }
+    updateHash();
     renderLists();
+  }
+
+  function updateHash() {
+    let h = "";
+    if (view === "ca") h = "#view=ca";
+    else if (view === "nat") h = "#view=national" + (natShow && natShow !== defaultShow() ? "&show=" + natShow : "");
+    history.replaceState(null, "", h || location.pathname + location.search);
+  }
+
+  // ------------------------------------------------- national consultations
+  // Built daily by scripts/fetch_national.py into data/national.json. tERC's flags
+  // (relevant, responded) live in data/static/national-terc.csv: one row per
+  // consultation tERC considers relevant. They can be edited on GitHub or with the
+  // "Edit tERC flags" button, which saves through the GitHub API with a token.
+  const REPO = "terc-uk/local-plan-map", BRANCH = "main", FLAGS_PATH = "data/static/national-terc.csv";
+  const FLAG_COLUMNS = ["id", "title", "responded", "link"];
+  const NEW_DAYS = 7;
+  const NATIONS = ["England", "Scotland", "Wales", "Northern Ireland"];
+  let national = [], natFlags = {}, natLayer, natLayersByName = {}, natLoaded = false;
+  let natShow = (location.hash.match(/[#&]show=(relevant|all|not)\b/) || [])[1] || null;
+  let editing = false, pending = {}, token = null, flagsSha = null;
+
+  function defaultShow() { return Object.keys(natFlags).length ? "relevant" : "all"; }
+  function flagFor(id) { return id in pending ? pending[id] : natFlags[id]; }
+
+  function natStatus(c) {
+    const start = parse(c.start), end = parse(c.end);
+    const ahead = d => (daysBetween(today, d) <= SOON_DAYS ? "soon" : "later");
+    if (end) {
+      if (end < today) return { s: daysBetween(end, today) <= RECENT_DAYS ? "recent" : "past", start, end };
+      if (start && today < start) return { s: ahead(start), start, end };
+      return { s: "open", start, end };
+    }
+    if (c.state === "closed") {
+      const ref = parse(c.published || c.start || c.first_seen);
+      return { s: ref && daysBetween(ref, today) <= RECENT_DAYS ? "recent" : "past", start, end: null, ref };
+    }
+    if (start && today < start) return { s: ahead(start), start, end: null };
+    if (c.state === "forthcoming") return { s: "soon", start, end: null };
+    if (!c.state) {
+      // status not known yet (page not read): assume the usual six weeks from publication
+      const ref = parse(c.published || c.start);
+      if (ref && daysBetween(ref, today) > DEFAULT_LENGTH_DAYS) {
+        return { s: daysBetween(ref, today) <= RECENT_DAYS ? "recent" : "past", start, end: null, ref };
+      }
+    }
+    return { s: "open", start, end: null };
+  }
+
+  function appliesTo(c, nation) { return c.nations.includes("UK") || c.nations.includes(nation); }
+
+  function natMatchesQuery(c) {
+    if (!query) return true;
+    return [c.title, c.org, c.kind, ...(c.nations || [])].join(" ").toLowerCase().includes(query);
+  }
+
+  function natPasses(c, show) {
+    const rel = !!flagFor(c.id);
+    return show === "all" || (show === "relevant" ? rel : !rel);
+  }
+
+  // consultations in the current list: matching the search and relevance filter, not long closed
+  function natRows(show) {
+    const rows = [];
+    for (const c of national) {
+      if (!natMatchesQuery(c) || !natPasses(c, show || natShow)) continue;
+      const st = natStatus(c);
+      if (st.s === "past") continue;
+      if ((st.s === "soon" || st.s === "later") && st.start && daysBetween(today, st.start) > LIST_AHEAD_DAYS) continue;
+      rows.push({ c, st });
+    }
+    return rows;
+  }
+
+  function natNationStatus(name) {
+    let best = "data";
+    for (const { c, st } of natRows()) {
+      if (appliesTo(c, name) && RANK[st.s] > RANK[best]) best = st.s;
+    }
+    return best;
+  }
+
+  function natStyle(feature) {
+    const s = natNationStatus(feature.properties.name);
+    return {
+      color: s === "open" ? "#1f2933" : "#3e4852",
+      weight: s === "open" ? 3 : 1.4, opacity: 1,
+      fillColor: COLOURS[s], fillOpacity: 0.7,
+    };
+  }
+
+  function natWhen(c, st) {
+    if (st.s === "open") {
+      if (!st.end) return c.start ? `Opened ${fmt(c.start)}, closing date not given` : "Open, closing date not given";
+      const left = daysBetween(today, st.end);
+      return `Closes ${fmt(c.end)} (${left === 0 ? "today" : left === 1 ? "1 day left" : left + " days left"})`;
+    }
+    if (st.s === "recent") return st.end ? `Closed ${fmt(c.end)}` : "Closed";
+    return st.start ? `Opens ${fmt(c.start)}${c.end ? ", closes " + fmt(c.end) : ""}` : "Opening date not given yet";
+  }
+
+  function nationTags(c) {
+    const ns = c.nations.includes("UK") ? ["UK"] : c.nations;
+    return ns.map(n => `<span class="tag">${esc(n)}</span>`).join("");
+  }
+
+  function natFlagHtml(c) {
+    const f = flagFor(c.id);
+    let html = "";
+    if (f && f.responded) {
+      html += respondedHtml(f);
+    } else if (f && natShow !== "relevant") {
+      html += ` <span class="badge rel">tERC relevant</span>`;
+    }
+    return html;
+  }
+
+  function natEditHtml(c) {
+    if (!editing) return "";
+    const f = flagFor(c.id);
+    return `<div class="edit-row">
+      <label><input type="checkbox" data-rel="${esc(c.id)}"${f ? " checked" : ""}> Relevant to tERC</label>
+      <label>Responded <input type="date" data-resp="${esc(c.id)}" value="${esc((f && f.responded) || "")}"></label></div>`;
+  }
+
+  function natItemHtml({ c, st }) {
+    const url = safeUrl(c.url);
+    const isNew = c.first_seen && daysBetween(parse(c.first_seen), today) <= NEW_DAYS;
+    return `<div class="item nat ${st.s}${flagFor(c.id) ? " flagged" : ""}" data-nat="${esc(c.id)}">
+      <div class="who">${esc(c.org || c.source)}${nationTags(c)}${isNew ? '<span class="badge new">new</span>' : ""}</div>
+      <div class="what">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}
+        <span class="kind">${esc(c.kind || "")}</span></div>
+      <div class="when">${esc(natWhen(c, st))}<span class="flag">${natFlagHtml(c)}</span></div>
+      ${natEditHtml(c)}</div>`;
+  }
+
+  function renderNatLists(el) {
+    if (!natLoaded) { el.innerHTML = `<p class="loading">Loading national consultations...</p>`; return; }
+    if (!natShow) natShow = defaultShow();
+    // counts on the filter buttons
+    for (const b of document.querySelectorAll(".filter-toggle button")) {
+      b.setAttribute("aria-checked", String(b.dataset.show === natShow));
+      b.querySelector(".n").textContent = `(${natRows(b.dataset.show).length})`;
+    }
+    const rows = natRows();
+    const endKey = r => (r.st.end ? +r.st.end : Infinity);
+    const open = rows.filter(r => r.st.s === "open").sort((a, b) => endKey(a) - endKey(b));
+    const upcoming = rows.filter(r => r.st.s === "soon" || r.st.s === "later")
+      .sort((a, b) => (a.st.start ? +a.st.start : Infinity) - (b.st.start ? +b.st.start : Infinity));
+    const recent = rows.filter(r => r.st.s === "recent")
+      .sort((a, b) => (+(b.st.end || b.st.ref || 0)) - (+(a.st.end || a.st.ref || 0)));
+    const list = l => l.length ? l.map(natItemHtml).join("") : `<p class="empty">None found.</p>`;
+    const empty = natShow === "relevant" && !Object.keys(natFlags).length && !editing
+      ? `<p class="empty">No consultations have been marked as relevant to tERC yet. Choose "All" to see everything.</p>` : "";
+    el.innerHTML = empty +
+      `<h2>Open now <span class="count">(${open.length})</span></h2>` + list(open) +
+      `<h2>Coming up <span class="count">(${upcoming.length})</span></h2>` + list(upcoming) +
+      `<details class="closed-list"><summary><h2>Closed in the last 12 months <span class="count">(${recent.length})</span></h2></summary></details>`;
+    const det = el.querySelector(".closed-list");
+    det.addEventListener("toggle", () => {
+      if (det.open && !det.dataset.filled) { det.insertAdjacentHTML("beforeend", list(recent)); det.dataset.filled = "1"; }
+    });
+  }
+
+  function natPopupHtml(feature) {
+    const name = feature.properties.name;
+    const rows = natRows().filter(r => appliesTo(r.c, name) && r.st.s !== "recent")
+      .sort((a, b) => (a.st.end ? +a.st.end : Infinity) - (b.st.end ? +b.st.end : Infinity));
+    const label = { relevant: "relevant to tERC", all: "", not: "not marked relevant" }[natShow];
+    let html = `<div class="pop"><h3>${esc(name)}</h3><div class="facts">${rows.length} open or upcoming ${label} consultation${rows.length === 1 ? "" : "s"} that apply here, including UK-wide ones.</div><ul>`;
+    for (const { c, st } of rows.slice(0, 25)) {
+      const url = safeUrl(c.url);
+      html += `<li>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}` +
+        `<span class="badge ${st.s}">${{ open: "open", soon: "soon", later: "later" }[st.s]}</span>` +
+        `<br><span class="d">${esc(c.org || "")} &middot; ${esc(natWhen(c, st))}</span>${natFlagHtml(c)}</li>`;
+    }
+    if (rows.length > 25) html += `<li class="d">and ${rows.length - 25} more in the list</li>`;
+    return html + `</ul></div>`;
+  }
+
+  function highlightNations(c, on) {
+    if (!natLayer) return;
+    for (const n of NATIONS) {
+      const layer = natLayersByName[n];
+      if (!layer) continue;
+      if (on && appliesTo(c, n)) layer.setStyle({ weight: 4, color: "#0b5cad" });
+      else natLayer.resetStyle(layer);
+    }
+  }
+
+  // ---- editing tERC flags (saved to GitHub)
+  function csvField(v) { v = String(v == null ? "" : v); return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; }
+  function toCsv(rows) { return [FLAG_COLUMNS.join(","), ...rows.map(r => FLAG_COLUMNS.map(k => csvField(r[k])).join(","))].join("\n") + "\n"; }
+  function b64decode(s) { return new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\s/g, "")), ch => ch.charCodeAt(0))); }
+  function b64encode(s) { let bin = ""; for (const byte of new TextEncoder().encode(s)) bin += String.fromCharCode(byte); return btoa(bin); }
+  function setFlags(rows) {
+    natFlags = {};
+    for (const r of rows) if (r.id) natFlags[r.id.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")] = r;
+  }
+
+  async function gh(path, opts = {}) {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/${path}`, {
+      ...opts,
+      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) },
+    });
+    if (r.status === 404) return null;
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(r.status === 401 ? "the token was not accepted" : r.status === 403 ? "the token does not have write access to " + REPO : (body.message || "HTTP " + r.status));
+    }
+    return r.json();
+  }
+
+  async function loadFlagsFromGitHub() {
+    const file = await gh(`contents/${FLAGS_PATH}?ref=${BRANCH}`);
+    flagsSha = file ? file.sha : null;
+    return file ? parseCsv(b64decode(file.content)).filter(r => r.id) : [];
+  }
+
+  function storedToken() {
+    try { return sessionStorage.getItem("terc-gh-token") || localStorage.getItem("terc-gh-token"); } catch (e) { return null; }
+  }
+  function storeToken(t, remember) {
+    try {
+      sessionStorage.setItem("terc-gh-token", t);
+      if (remember) localStorage.setItem("terc-gh-token", t); else localStorage.removeItem("terc-gh-token");
+    } catch (e) { /* storage unavailable: token lasts for this page only */ }
+  }
+  function forgetToken() {
+    try { sessionStorage.removeItem("terc-gh-token"); localStorage.removeItem("terc-gh-token"); } catch (e) { /* ignore */ }
+  }
+
+  async function startEditing(t) {
+    token = t;
+    const rows = await loadFlagsFromGitHub();  // also checks the token can read the repository
+    setFlags(rows);
+    editing = true; pending = {};
+    document.getElementById("token-form").hidden = true;
+    document.getElementById("edit-start").hidden = true;
+    document.getElementById("save-bar").hidden = false;
+    updateSaveBar();
+    refresh();
+  }
+
+  function stopEditing() {
+    if (Object.keys(pending).length && !confirmDiscard()) return;
+    editing = false; pending = {}; token = null;
+    document.getElementById("save-bar").hidden = true;
+    document.getElementById("edit-start").hidden = false;
+    refresh();
+  }
+
+  function confirmDiscard() {
+    const status = document.getElementById("save-status");
+    if (status.dataset.confirm) { delete status.dataset.confirm; return true; }
+    status.textContent = "You have unsaved changes. Press again to discard them.";
+    status.dataset.confirm = "1";
+    return false;
+  }
+
+  function updateSaveBar(msg) {
+    const n = Object.keys(pending).length;
+    const status = document.getElementById("save-status");
+    delete status.dataset.confirm;
+    status.textContent = msg || (n ? `${n} unsaved change${n === 1 ? "" : "s"}` : "Tick consultations that are relevant to tERC.");
+    document.getElementById("save-btn").disabled = !n;
+    document.getElementById("discard-btn").hidden = !n;
+  }
+
+  function setPending(id, row) {
+    const before = natFlags[id];
+    const same = (!before && !row) || (before && row && before.responded === row.responded && (before.link || "") === (row.link || ""));
+    if (same) delete pending[id]; else pending[id] = row;
+    updateSaveBar();
+    const c = national.find(x => x.id === id);
+    document.querySelectorAll(`.item.nat[data-nat="${CSS.escape(id)}"]`).forEach(el => {
+      el.classList.toggle("flagged", !!row);
+      const f = el.querySelector(".flag"); if (f && c) f.innerHTML = natFlagHtml(c);
+      const box = el.querySelector("input[data-rel]"); if (box) box.checked = !!row;
+      const d = el.querySelector("input[data-resp]"); if (d) d.value = (row && row.responded) || "";
+    });
+    if (natLayer) natLayer.setStyle(natStyle);
+  }
+
+  async function saveFlags() {
+    const btn = document.getElementById("save-btn");
+    btn.disabled = true;
+    updateSaveBar("Saving...");
+    try {
+      const latest = await loadFlagsFromGitHub();  // merge into the latest file so nothing is overwritten
+      const byId = new Map(latest.map(r => [r.id, r]));
+      for (const [id, row] of Object.entries(pending)) {
+        if (row) byId.set(id, Object.assign(byId.get(id) || {}, row));
+        else byId.delete(id);
+      }
+      const rows = [...byId.values()];
+      const n = Object.keys(pending).length;
+      const body = { message: `Update tERC flags on ${n} national consultation${n === 1 ? "" : "s"}`, content: b64encode(toCsv(rows)), branch: BRANCH };
+      if (flagsSha) body.sha = flagsSha;
+      const res = await gh(`contents/${FLAGS_PATH}`, { method: "PUT", body: JSON.stringify(body) });
+      flagsSha = res && res.content ? res.content.sha : null;
+      setFlags(rows);
+      pending = {};
+      updateSaveBar("Saved. The public map updates within a few minutes.");
+      refresh();
+    } catch (err) {
+      updateSaveBar(`Could not save: ${err.message}. Your changes are still here.`);
+      btn.disabled = false;
+    }
+  }
+
+  function onListChange(e) {
+    const t = e.target;
+    if (!editing) return;
+    if (t.matches("input[data-rel]")) {
+      const id = t.dataset.rel, c = national.find(x => x.id === id);
+      setPending(id, t.checked ? Object.assign({ id, title: c ? c.title : "", responded: "", link: "" }, flagFor(id) || {}) : null);
+    } else if (t.matches("input[data-resp]")) {
+      const id = t.dataset.resp, c = national.find(x => x.id === id);
+      const row = Object.assign({ id, title: c ? c.title : "", responded: "", link: "" }, flagFor(id) || {});
+      row.responded = t.value || "";
+      setPending(id, row);  // recording a response also marks the consultation as relevant
+    }
   }
 
   function buildLpaOutline() {
@@ -433,6 +764,11 @@
   }
 
   function renderLists() {
+    if (view === "nat") {
+      renderNatLists(document.getElementById("lists"));
+      if (natLayer) natLayer.setStyle(natStyle);
+      return;
+    }
     if (view === "ca") {
       const el = document.getElementById("lists");
       if (!caLayer) { el.innerHTML = `<p class="loading">Loading combined authority data...</p>`; return; }
@@ -486,6 +822,7 @@
   function refresh() {
     if (lpaLayer) lpaLayer.setStyle(style);
     if (caLayer) caLayer.setStyle(caStyle);
+    if (natLayer) natLayer.setStyle(natStyle);
     renderLists();
   }
 
@@ -536,7 +873,8 @@
         layer.on("mouseover", () => layer.setStyle({ weight: 2, color: "#1f2933" }));
         layer.on("mouseout", () => layer.setStyle(DEVOLVED_STYLE));
       },
-    }).addTo(map);
+    });
+    if (view !== "nat") devolvedLayer.addTo(map).bringToBack();
     if (query) renderLists();
   }).catch(err => console.warn("Scotland and Wales layer not loaded:", err));
 
@@ -584,17 +922,103 @@
     .then(text => { responses = parseCsv(text).filter(r => r.plan); renderLists(); })
     .catch(err => console.warn("tERC responses not loaded:", err));
 
+  Promise.all([
+    fetch("data/national.json").then(r => { if (!r.ok) throw new Error("national.json " + r.status); return r.json(); }),
+    fetch("data/static/nations.geojson").then(r => { if (!r.ok) throw new Error("nations.geojson " + r.status); return r.json(); }),
+    fetch(FLAGS_PATH).then(r => (r.ok ? r.text() : "")).catch(() => ""),
+  ]).then(([natData, geo, flagsText]) => {
+    national = (natData.consultations || []).map(c => Object.assign({ nations: ["UK"] }, c));
+    if (!editing) setFlags(parseCsv(flagsText || "").filter(r => r.id));
+    natLoaded = true;
+    const gen = natData.generated ? new Date(natData.generated) : null;
+    const failed = Object.values(natData.sources || {}).filter(s => !s.ok).map(s => s.label);
+    document.getElementById("nat-meta").textContent =
+      (gen ? `Updated ${gen.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.` : "") +
+      (failed.length ? ` Not refreshed on the last run: ${failed.join(", ")}.` : "");
+    natLayer = L.geoJSON(geo, {
+      style: natStyle,
+      onEachFeature(feature, layer) {
+        natLayersByName[feature.properties.name] = layer;
+        layer.bindPopup(() => natPopupHtml(feature), { maxWidth: 360, maxHeight: 400 });
+        layer.bindTooltip(feature.properties.name, { sticky: true, direction: "top" });
+        layer.on("mouseover", () => layer.setStyle({ weight: 3, color: "#1f2933" }));
+        layer.on("mouseout", () => natLayer.resetStyle(layer));
+      },
+    });
+    if (view === "nat") { natLayer.addTo(map); renderLists(); updateHash(); }
+  }).catch(err => {
+    console.warn("National consultations not loaded:", err);
+    natLoaded = true;
+    if (view === "nat") document.getElementById("lists").innerHTML =
+      `<p class="error">Could not load the national consultations (${esc(err.message)}). ` +
+      `If this is a new setup, run the "Update local plan data" workflow in the Actions tab.</p>`;
+  });
+
+  const VIEWS = ["lpa", "ca", "nat"];
   document.querySelectorAll(".view-toggle button").forEach(btn => {
     btn.addEventListener("click", () => { if (btn.dataset.view !== view) setView(btn.dataset.view); });
     btn.addEventListener("keydown", e => {
       if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        const next = view === "ca" ? "lpa" : "ca";
+        const i = VIEWS.indexOf(view) + (e.key === "ArrowRight" ? 1 : -1);
+        const next = VIEWS[(i + VIEWS.length) % VIEWS.length];
         setView(next);
         document.querySelector(`.view-toggle button[data-view="${next}"]`).focus();
       }
     });
   });
-  if (view === "ca") setView("ca");
+  document.querySelectorAll(".filter-toggle button").forEach(btn => {
+    btn.addEventListener("click", () => { natShow = btn.dataset.show; updateHash(); renderLists(); });
+  });
+
+  // national list: edit controls and map highlighting
+  const listsEl = document.getElementById("lists");
+  listsEl.addEventListener("change", onListChange);
+  listsEl.addEventListener("mouseover", e => {
+    const el = e.target.closest(".item.nat");
+    if (el && el.dataset.nat !== listsEl.dataset.hover) {
+      listsEl.dataset.hover = el.dataset.nat;
+      const c = national.find(x => x.id === el.dataset.nat);
+      if (c) highlightNations(c, true);
+    }
+  });
+  listsEl.addEventListener("mouseleave", () => {
+    delete listsEl.dataset.hover;
+    if (natLayer) natLayer.setStyle(natStyle);
+  });
+
+  // editing tERC flags
+  const tokenForm = document.getElementById("token-form");
+  const tokenError = document.getElementById("token-error");
+  document.getElementById("edit-start").addEventListener("click", () => {
+    const saved = storedToken();
+    if (saved) {
+      startEditing(saved).catch(() => { forgetToken(); tokenForm.hidden = false; });
+    } else {
+      tokenForm.hidden = false;
+      document.getElementById("token").focus();
+    }
+  });
+  document.getElementById("token-cancel").addEventListener("click", () => { tokenForm.hidden = true; tokenError.hidden = true; });
+  tokenForm.addEventListener("submit", e => {
+    e.preventDefault();
+    const t = document.getElementById("token").value.trim();
+    if (!t) return;
+    tokenError.hidden = true;
+    startEditing(t).then(() => {
+      storeToken(t, document.getElementById("token-remember").checked);
+      document.getElementById("token").value = "";
+    }).catch(err => {
+      token = null;
+      tokenError.textContent = `Could not start editing: ${err.message}.`;
+      tokenError.hidden = false;
+    });
+  });
+  document.getElementById("save-btn").addEventListener("click", saveFlags);
+  document.getElementById("discard-btn").addEventListener("click", () => { pending = {}; updateSaveBar(); refresh(); });
+  document.getElementById("edit-stop").addEventListener("click", stopEditing);
+  window.addEventListener("beforeunload", e => { if (editing && Object.keys(pending).length) { e.preventDefault(); e.returnValue = ""; } });
+
+  if (view !== "lpa") setView(view);
 
   document.getElementById("predicted").addEventListener("change", e => { includePredicted = e.target.checked; refresh(); });
   let t;
