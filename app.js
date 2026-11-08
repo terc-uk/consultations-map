@@ -409,7 +409,13 @@
   // (relevant, responded) live in data/static/national-terc.csv: one row per
   // consultation tERC considers relevant. They can be edited on GitHub or with the
   // "Edit tERC flags" button, which saves through the GitHub API with a token.
-  const REPO = "terc-uk/local-plan-map", BRANCH = "main", FLAGS_PATH = "data/static/national-terc.csv";
+  // the repository is worked out from the GitHub Pages address, so a rename needs no code change
+  const REPO = (() => {
+    const owner = (location.hostname.match(/^([^.]+)\.github\.io$/) || [])[1];
+    const repo = location.pathname.split("/")[1];
+    return owner && repo ? `${owner}/${repo}` : "terc-uk/consultations-map";
+  })();
+  const BRANCH = "main", FLAGS_PATH = "data/static/national-terc.csv";
   const FLAG_COLUMNS = ["id", "title", "responded", "link"];
   const NEW_DAYS = 7;
   const NATIONS = ["England", "Scotland", "Wales", "Northern Ireland"];

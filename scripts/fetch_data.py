@@ -44,7 +44,7 @@ RETRIES = int(os.environ.get("FETCH_RETRIES", 6))  # waits of 5, 10, 20, 40, 60 
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "Mozilla/5.0 (compatible; local-plan-consultation-map/1.0; +https://github.com/terc-uk/local-plan-map)",
+    "User-Agent": "Mozilla/5.0 (compatible; terc-consultations-map/1.0; +https://github.com/terc-uk/consultations-map)",
     "Accept": "application/json, text/csv;q=0.9, */*;q=0.8",
 })
 csv.field_size_limit(sys.maxsize)  # boundary geometries are long
