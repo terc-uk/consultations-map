@@ -48,7 +48,7 @@ PAUSE = 0.3               # seconds between page fetches, to be polite
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "Mozilla/5.0 (compatible; local-plan-consultation-map/1.0; +https://github.com/terc-uk/local-plan-map)",
+    "User-Agent": "Mozilla/5.0 (compatible; terc-consultations-map/1.0; +https://github.com/terc-uk/consultations-map)",
 })
 
 

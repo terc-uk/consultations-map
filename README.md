@@ -1,4 +1,6 @@
-# Local plan consultations map
+# Consultations map
+
+Live at https://terc-uk.github.io/consultations-map/
 
 A map of local plan consultations and timetables in England, built from the government's
 [planning data platform](https://www.planning.data.gov.uk/dataset/local-plan), with views for
@@ -134,7 +136,7 @@ The easiest way to edit it is on the map itself:
 
 1. Create a token at GitHub > Settings > Developer settings > **Fine-grained personal access
    tokens** > Generate new token. Set **Resource owner** to `terc-uk`, **Repository access** to
-   *Only select repositories* > `local-plan-map`, and under **Repository permissions** set
+   *Only select repositories* > `consultations-map`, and under **Repository permissions** set
    **Contents** to *Read and write*. Choose an expiry date. (An organisation owner may need to
    approve tokens for `terc-uk`.)
 2. On the map, open **National**, choose **All**, click **Edit tERC flags** and paste the token.
@@ -198,7 +200,7 @@ checkbox. Where no closing date is published, the map assumes six weeks.
 ## Setting it up on GitHub Pages (about 10 minutes, free)
 
 1. **Create a GitHub account** at github.com if you don't have one.
-2. **Create a new public repository**, for example `local-plan-map`. Tick "Add a README" so it
+2. **Create a new public repository**, for example `consultations-map`. Tick "Add a README" so it
    isn't empty.
 3. **Upload the files.** On the repository page click **Add file > Upload files**, drag in
    everything from this folder (including the `.github` and `scripts` folders) and click
@@ -215,7 +217,7 @@ checkbox. Where no closing date is published, the map assumes six weeks.
 6. **Turn on Pages.** Go to **Settings > Pages**. Under "Build and deployment" choose
    **Deploy from a branch**, branch **main**, folder **/ (root)**, and save.
 7. After a minute or two the site will be live at
-   `https://YOUR-USERNAME.github.io/local-plan-map/`.
+   `https://YOUR-USERNAME.github.io/consultations-map/`.
 
 The data then refreshes every morning at about 05:17 UTC, and only creates a commit when
 something actually changed.
