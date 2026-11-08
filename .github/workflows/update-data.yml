@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "17 5 * * *"   # every day at 05:17 UTC
   workflow_dispatch: {}     # adds a "Run workflow" button in the Actions tab
+  push:                     # rebuild combined authority boundaries when their member list changes
+    branches: [main]
+    paths:
+      - data/static/strategic-authorities.csv
+      - scripts/build_strategic_areas.py
 
 permissions:
   contents: write
@@ -29,6 +34,9 @@ jobs:
       - name: Fetch data from planning.data.gov.uk
         run: python scripts/fetch_data.py
 
+      - name: Build combined authority boundaries
+        run: python scripts/build_strategic_areas.py
+
       - name: Commit if changed
         run: |
           git config user.name "github-actions[bot]"
@@ -41,7 +49,7 @@ jobs:
             fi
           fi
           git add data/
-          if $same_plans && git diff --cached --quiet -- data/lpas.geojson; then
+          if $same_plans && git diff --cached --quiet -- data/lpas.geojson data/strategic-authorities.geojson; then
             echo "No real change in the data. Skipping commit."
             git reset -q
           else
