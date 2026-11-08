@@ -21,6 +21,9 @@
   const today = startOfDay(new Date());
   let plans = {}, lpaLayer, layersByCode = {}, includePredicted = true, query = "";
   let devolved = [], devolvedLayer, devolvedLayersByCode = {};
+  // Combined authorities view: spatial development strategy (SDS) consultations
+  let view = /(^|[#&])view=ca\b/.test(location.hash) ? "ca" : "lpa";
+  let authorities = {}, caLayer, caLayersById = {}, lpaOutline, lpaGeo;
 
   // ---------------------------------------------------------------- utils
   function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
@@ -187,9 +190,10 @@
       ? `${fmt(w.start, w.precision)} to ${w.end ? fmt(w.end, w.precision) : "closing date not given"}`
       : `closes ${fmt(w.end, w.precision)}`;
     const pred = w.predicted ? ' <span class="pred">(predicted)</span>' : "";
+    const note = w.note ? ` <span class="d">&middot; ${esc(w.note)}</span>` : "";
     const url = safeUrl(w.url);
     const label = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(w.label)}</a>` : esc(w.label);
-    return `<li>${label}${badge}<br><span class="d">${esc(span)}</span>${pred}</li>`;
+    return `<li>${label}${badge}<br><span class="d">${esc(span)}</span>${pred}${note}</li>`;
   }
 
   function popupHtml(feature) {
@@ -228,6 +232,151 @@
     return html + `</div>`;
   }
 
+  // ------------------------------------------------- combined authorities
+  // SDS dates have no national dataset; they live in data/static/sds-consultations.csv
+  // and authority details in data/static/strategic-authorities.csv (edit those on GitHub).
+
+  function sdsWindows(a, kind) {
+    return a.windows.filter(w => !kind || w.kind === kind);
+  }
+
+  function caStatus(id) {
+    const a = authorities[id];
+    if (!a) return "none";
+    let best = "data";
+    for (const w of sdsWindows(a, "sds")) {
+      const st = windowStatus(w);
+      if (st && RANK[st.s] > RANK[best]) best = st.s;
+    }
+    return best;
+  }
+
+  function caStyle(feature) {
+    const s = caStatus(feature.properties.id);
+    return {
+      color: s === "open" ? "#1f2933" : "#3e4852",
+      weight: s === "open" ? 3 : 1.4,
+      opacity: 1,
+      fillColor: COLOURS[s], fillOpacity: 0.7,
+    };
+  }
+
+  function caPopupHtml(feature) {
+    const id = feature.properties.id;
+    const a = authorities[id] || { name: feature.properties.name, windows: [] };
+    const link = safeUrl(a.link);
+    let html = `<div class="pop"><h3>${esc(a.name)}</h3>`;
+    if (a.authority_type) html += `<div class="facts">${esc(a.authority_type)}</div>`;
+    html += `<div class="plan"><h4>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(a.sds_name)}</a>` : esc(a.sds_name || "Spatial development strategy")}</h4>`;
+    if (a.status) html += `<div class="facts">${esc(a.status)}</div>`;
+    const lines = sdsWindows(a, "sds").map(windowLine).filter(Boolean);
+    if (lines.length) html += `<ul>${lines.join("")}</ul>`;
+    else if (!a.status) html += `<div class="none">No SDS consultation dates published.</div>`;
+    if (a.next_step) html += `<div class="facts" style="margin-top:6px"><strong>Next:</strong> ${esc(a.next_step)}</div>`;
+    if (a.note) html += `<div class="facts">${esc(a.note)}</div>`;
+    html += `</div>`;
+    const related = sdsWindows(a, "related").map(windowLine).filter(Boolean);
+    if (related.length) html += `<div class="related-h">Related strategic plan</div><ul>${related.join("")}</ul>`;
+    const names = feature.properties.member_names || [];
+    if (names.length) {
+      html += `<details><summary>Member council areas (${names.length})</summary><p class="members">${names.map(esc).join(", ")}</p></details>`;
+    }
+    return html + `</div>`;
+  }
+
+  function caMatches(a) {
+    if (!query) return true;
+    const f = caLayersById[a.id] && caLayersById[a.id].feature;
+    const hay = [a.name, a.sds_name, ...((f && f.properties.member_names) || [])].join(" ").toLowerCase();
+    return hay.includes(query);
+  }
+
+  function caItemHtml({ a, w, st }, idx) {
+    let when;
+    if (st.s === "open") {
+      const left = daysBetween(today, st.end);
+      when = `Closes ${fmt(w.end)} (${left === 0 ? "today" : left === 1 ? "1 day left" : left + " days left"})`;
+    } else if (st.s === "recent") {
+      when = `${fmt(w.start)} to ${fmt(w.end)}`;
+    } else {
+      when = `Opens ${fmt(w.start, w.precision)}${w.end ? ", closes " + fmt(w.end, w.precision) : ""}`;
+    }
+    return `<button class="item ${st.s}${w.kind === "related" ? " related" : ""}" data-ca="${esc(a.id)}" data-idx="${idx}">
+      <div class="who">${esc(a.name)}</div>
+      <div class="what">${esc(w.label)}</div>
+      <div class="when">${esc(when)}</div></button>`;
+  }
+
+  function renderCaLists(el) {
+    const rows = [];
+    const shown = Object.values(authorities).filter(caMatches);
+    for (const a of shown) {
+      for (const w of a.windows) {
+        const st = windowStatus(w);
+        if (!st || st.s === "past") continue;
+        if ((st.s === "soon" || st.s === "later") && daysBetween(today, st.start) > LIST_AHEAD_DAYS) continue;
+        rows.push({ a, w, st });
+      }
+    }
+    const open = rows.filter(r => r.st.s === "open").sort((x, y) => x.st.end - y.st.end);
+    const upcoming = rows.filter(r => r.st.s === "soon" || r.st.s === "later").sort((x, y) => x.st.start - y.st.start);
+    const recent = rows.filter(r => r.st.s === "recent").sort((x, y) => y.st.end - x.st.end);
+    const section = (title, list) => `<h2>${title} <span class="count">(${list.length})</span></h2>` +
+      (list.length ? list.map(r => caItemHtml(r)).join("") : `<p class="empty">None found.</p>`);
+    const pending = shown.filter(a => !rows.some(r => r.a === a && r.w.kind === "sds" && r.st.s !== "recent"));
+    el.innerHTML =
+      section("SDS consultations open now", open) +
+      section("Coming up in the next 12 months", upcoming) +
+      section("Closed in the last 12 months", recent) +
+      `<h2>No upcoming SDS dates published <span class="count">(${pending.length})</span></h2>` +
+      pending.map(a => `<button class="item next" data-ca="${esc(a.id)}">
+        <div class="who">${esc(a.name)}</div>
+        <div class="what">${esc(a.next_step || a.status || "")}</div></button>`).join("");
+    el.querySelectorAll(".item[data-ca]").forEach(btn => btn.addEventListener("click", () => focusCa(btn.dataset.ca)));
+  }
+
+  function focusCa(id) {
+    const layer = caLayersById[id];
+    if (!layer) return;
+    map.fitBounds(layer.getBounds(), { padding: [30, 30], maxZoom: 10 });
+    layer.openPopup(layer.getBounds().getCenter());
+  }
+
+  function setView(v) {
+    view = v;
+    document.querySelectorAll(".view-toggle button").forEach(b => b.setAttribute("aria-checked", String(b.dataset.view === v)));
+    document.querySelectorAll("[data-lpa]").forEach(s => { s.textContent = s.dataset[v === "ca" ? "ca" : "lpa"]; });
+    document.querySelectorAll(".lpa-only").forEach(s => { s.hidden = v === "ca"; });
+    document.querySelectorAll(".ca-only").forEach(s => { s.hidden = v !== "ca"; });
+    document.getElementById("view-note").hidden = v !== "ca";
+    document.getElementById("predicted-toggle").hidden = v === "ca";
+    const search = document.getElementById("search");
+    search.placeholder = v === "ca" ? "Search authority or council" : "Search council or plan";
+    search.setAttribute("aria-label", search.placeholder);
+    map.closePopup();
+    if (v === "ca") {
+      if (lpaLayer) map.removeLayer(lpaLayer);
+      if (caLayer) caLayer.addTo(map);
+      if (lpaOutline) lpaOutline.addTo(map);
+    } else {
+      if (caLayer) map.removeLayer(caLayer);
+      if (lpaOutline) map.removeLayer(lpaOutline);
+      if (lpaLayer) lpaLayer.addTo(map);
+    }
+    if (devolvedLayer) devolvedLayer.bringToBack();
+    history.replaceState(null, "", v === "ca" ? "#view=ca" : location.pathname + location.search);
+    renderLists();
+  }
+
+  function buildLpaOutline() {
+    if (lpaOutline || !lpaGeo) return;
+    lpaOutline = L.geoJSON(lpaGeo, {
+      interactive: false,
+      style: { color: "#5b6672", weight: 0.5, opacity: 0.55, fill: false },
+    });
+    if (view === "ca") lpaOutline.addTo(map);
+  }
+
   // ---------------------------------------------------------------- list
   function collectWindows() {
     const rows = [];
@@ -263,6 +412,12 @@
   }
 
   function renderLists() {
+    if (view === "ca") {
+      const el = document.getElementById("lists");
+      if (!caLayer) { el.innerHTML = `<p class="loading">Loading combined authority data...</p>`; return; }
+      renderCaLists(el);
+      return;
+    }
     const rows = collectWindows();
     const open = rows.filter(r => r.st.s === "open").sort((a, b) => a.st.end - b.st.end);
     const upcoming = rows.filter(r => r.st.s !== "open").sort((a, b) => a.st.start - b.st.start);
@@ -309,6 +464,7 @@
 
   function refresh() {
     if (lpaLayer) lpaLayer.setStyle(style);
+    if (caLayer) caLayer.setStyle(caStyle);
     renderLists();
   }
 
@@ -327,8 +483,10 @@
         layer.on("mouseover", () => layer.setStyle({ weight: 2, color: "#1f2933" }));
         layer.on("mouseout", () => lpaLayer.resetStyle(layer));
       },
-    }).addTo(map);
-    lpaLayer.bringToFront();
+    });
+    if (view === "lpa") lpaLayer.addTo(map);
+    lpaGeo = lpas;
+    buildLpaOutline();
 
     const gen = planData.generated ? new Date(planData.generated) : null;
     const c = planData.counts || {};
@@ -360,6 +518,57 @@
     }).addTo(map);
     if (query) renderLists();
   }).catch(err => console.warn("Scotland and Wales layer not loaded:", err));
+
+  Promise.all([
+    fetch("data/strategic-authorities.geojson").then(r => { if (!r.ok) throw new Error("strategic-authorities.geojson " + r.status); return r.json(); }),
+    fetch("data/static/strategic-authorities.csv").then(r => { if (!r.ok) throw new Error("strategic-authorities.csv " + r.status); return r.text(); }),
+    fetch("data/static/sds-consultations.csv").then(r => { if (!r.ok) throw new Error("sds-consultations.csv " + r.status); return r.text(); }),
+  ]).then(([geo, authText, consText]) => {
+    for (const row of parseCsv(authText)) {
+      if (row.id) authorities[row.id] = Object.assign(row, { windows: [] });
+    }
+    for (const row of parseCsv(consText)) {
+      const a = authorities[row.authority];
+      if (!a || (!row.start && !row.end)) continue;
+      a.windows.push({
+        kind: row.kind === "related" ? "related" : "sds",
+        label: row.label, start: row.start || null, end: row.end || null,
+        precision: "day", predicted: false, url: row.url, note: row.note,
+      });
+    }
+    for (const a of Object.values(authorities)) a.windows.sort((x, y) => (x.start || x.end).localeCompare(y.start || y.end));
+    caLayer = L.geoJSON(geo, {
+      style: caStyle,
+      onEachFeature(feature, layer) {
+        caLayersById[feature.properties.id] = layer;
+        layer.bindPopup(() => caPopupHtml(feature), { maxWidth: 340, maxHeight: 400 });
+        layer.bindTooltip(feature.properties.name, { sticky: true, direction: "top" });
+        layer.on("mouseover", () => layer.setStyle({ weight: 3, color: "#1f2933" }));
+        layer.on("mouseout", () => caLayer.resetStyle(layer));
+      },
+    });
+    if (view === "ca") {
+      caLayer.addTo(map);
+      if (lpaOutline) lpaOutline.bringToFront();
+      renderLists();
+    }
+  }).catch(err => {
+    console.warn("Combined authorities layer not loaded:", err);
+    if (view === "ca") document.getElementById("lists").innerHTML =
+      `<p class="error">Could not load the combined authority data (${esc(err.message)}).</p>`;
+  });
+
+  document.querySelectorAll(".view-toggle button").forEach(btn => {
+    btn.addEventListener("click", () => { if (btn.dataset.view !== view) setView(btn.dataset.view); });
+    btn.addEventListener("keydown", e => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        const next = view === "ca" ? "lpa" : "ca";
+        setView(next);
+        document.querySelector(`.view-toggle button[data-view="${next}"]`).focus();
+      }
+    });
+  });
+  if (view === "ca") setView("ca");
 
   document.getElementById("predicted").addEventListener("change", e => { includePredicted = e.target.checked; refresh(); });
   let t;

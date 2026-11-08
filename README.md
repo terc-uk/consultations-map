@@ -45,6 +45,51 @@ Rows marked `council_homepage` are placeholders waiting for a proper plan page l
 Boundaries are in `data/static/scotland-wales-councils.geojson` (2013 council areas, simplified)
 and do not change with the daily data refresh.
 
+## Combined authorities view (spatial development strategies)
+
+The toggle at the top of the side panel switches between **Local authorities** (the local plan
+map described above) and **Combined authorities**. The second view shows each combined, mayoral or
+strategic authority, coloured by the status of consultations on its spatial development strategy
+(SDS), using the same colours as the local plan view. Council boundaries are drawn as thin outlines
+for orientation; areas outside a combined authority are left unshaded. You can link straight to
+this view with `#view=ca` at the end of the address.
+
+There is no national dataset of SDS timetables, so this layer is maintained by hand in two CSV
+files you can edit on GitHub, like the Scotland and Wales links:
+
+`data/static/strategic-authorities.csv`: one row per authority.
+
+| Column | Meaning |
+|---|---|
+| `id` | Short identifier used to link consultations (do not change) |
+| `name` | Name shown on the map |
+| `authority_type` | For example "Mayoral combined authority" |
+| `sds_name`, `link` | SDS title and the page it links to |
+| `status` | One-line summary of where the SDS has got to |
+| `next_step` | The next published stage, with dates where known |
+| `note` | Optional extra note |
+| `members` | Local planning authority codes (from `data/lpas.geojson`), separated by `;` |
+
+`data/static/sds-consultations.csv`: one row per consultation.
+
+| Column | Meaning |
+|---|---|
+| `authority` | The `id` from the authorities file |
+| `kind` | `sds` for an SDS consultation, `related` for another strategic plan led with the authority (shown in the popup but not used for the colour) |
+| `label` | Name of the consultation |
+| `start`, `end` | Dates as `YYYY-MM-DD` |
+| `url` | Consultation page |
+| `note` | Optional short note |
+
+Combined authority boundaries are built from the member council areas by
+`scripts/build_strategic_areas.py`, which writes `data/strategic-authorities.geojson`. National
+park land is split between the surrounding councils so the shapes have no holes. The workflow
+rebuilds the boundaries every day and whenever the authorities CSV changes.
+
+The Planning and Infrastructure Act 2025 makes SDSs a duty for strategic planning authorities from
+26 November 2026, so most authorities have not yet published SDS timetables. The London Plan is
+London's SDS under the Greater London Authority Act 1999.
+
 ## How it works
 
 ```
@@ -108,6 +153,7 @@ You need Python 3.
 ```bash
 pip install requests shapely
 python scripts/fetch_data.py         # writes data/plans.json and data/lpas.geojson
+python scripts/build_strategic_areas.py   # writes data/strategic-authorities.geojson
 python -m http.server 8000           # then open http://localhost:8000
 ```
 

@@ -17,17 +17,23 @@
     </header>
 
     <div class="controls">
+      <div class="view-toggle" role="radiogroup" aria-label="Map view">
+        <button type="button" role="radio" data-view="lpa" aria-checked="true">Local authorities</button>
+        <button type="button" role="radio" data-view="ca" aria-checked="false">Combined authorities</button>
+      </div>
+      <p id="view-note" class="view-note" hidden>Spatial development strategy (SDS) consultations by combined, mayoral and strategic authorities.</p>
       <input id="search" type="search" placeholder="Search council or plan" aria-label="Search council or plan">
-      <label class="toggle"><input id="predicted" type="checkbox" checked> Include predicted dates</label>
+      <label class="toggle" id="predicted-toggle"><input id="predicted" type="checkbox" checked> Include predicted dates</label>
     </div>
 
     <div class="legend" aria-label="Map key">
-      <span><i class="sw open"></i>Open now</span>
+      <span><i class="sw open"></i><span data-lpa="Open now" data-ca="SDS consultation open">Open now</span></span>
       <span><i class="sw soon"></i>Opens within 6 months</span>
       <span><i class="sw later"></i>Opens later</span>
       <span><i class="sw recent"></i>Closed in last 12 months</span>
-      <span><i class="sw data"></i>Plan data, no recent consultation</span>
-      <span><i class="sw none"></i>No data published</span>
+      <span><i class="sw data"></i><span data-lpa="Plan data, no recent consultation" data-ca="SDS in preparation, no recent consultation">Plan data, no recent consultation</span></span>
+      <span class="lpa-only"><i class="sw none"></i>No data published</span>
+      <span class="wide ca-only" hidden><i class="sw outline"></i>Council boundaries (areas outside a combined authority are unshaded)</span>
       <span class="wide"><i class="sw devolved"></i>Scotland and Wales: plan links only (no national timetable data)</span>
     </div>
 
@@ -41,6 +47,8 @@
         Open Government Licence v3.0, &copy; Crown copyright and database right.
         Coverage is incomplete: only some councils publish timetable data so far.
         Always check dates on the council's own website.</p>
+      <p>Combined authority SDS dates are compiled by hand from authority websites and committee papers
+        (last checked 8 November 2026). Boundaries are built from the council areas above.</p>
       <p>Scotland and Wales boundaries: <a href="https://github.com/martinjc/UK-GeoJSON">Martin Chorley, UK-GeoJSON</a> (CC BY 4.0).
         Contains Ordnance Survey data &copy; Crown copyright and database right 2014.</p>
     </footer>
