@@ -116,6 +116,10 @@ h1 { font-size: 18px; margin: 0 0 2px; }
 .badge.soon { background: var(--c-soon); color: #fff; }
 .badge.later { background: var(--c-later); color: #1f2933; }
 .badge.recent { background: var(--c-recent); color: #000; }
+/* tERC response tag: tick and words carry the meaning, not colour */
+.badge.terc { background: #fff; color: var(--ink); border: 1px solid var(--ink); margin-left: 0; text-decoration: none; white-space: nowrap; }
+a.badge.terc:hover { background: #eef1f4; }
+.item .when .badge.terc { margin-left: 4px; }
 
 footer { padding: 12px 16px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); }
 footer p { margin: 0 0 6px; }
@@ -135,6 +139,7 @@ a { color: var(--accent); }
 .pop .tt .d { color: var(--muted); font-variant-numeric: tabular-nums; }
 .pop .pred { font-style: italic; }
 .pop .none { color: var(--muted); }
+.pop .ref { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
 @media (max-width: 760px) {
   body { flex-direction: column-reverse; }
