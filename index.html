@@ -32,6 +32,7 @@
       </div>
       <input id="search" type="search" placeholder="Search council or plan" aria-label="Search council or plan">
       <label class="toggle" id="predicted-toggle"><input id="predicted" type="checkbox" checked> Include predicted dates</label>
+      <label class="toggle not-nat" id="responded-toggle"><input id="responded-only" type="checkbox"> Only consultations tERC responded to (including past ones)</label>
       <div class="nat-only edit-entry" hidden>
         <button type="button" id="edit-start" class="linkish">Edit tERC flags</button>
         <form id="token-form" class="token-form" hidden>
@@ -56,6 +57,7 @@
       <span class="lpa-only"><i class="sw none"></i>No data published</span>
       <span class="wide ca-only" hidden><i class="sw outline"></i>Council boundaries (areas outside a combined authority are unshaded)</span>
       <span class="wide not-nat"><i class="sw devolved"></i>Scotland and Wales: plan links only (no national timetable data)</span>
+      <span class="wide resp-only" hidden>Showing only consultations tERC responded to. Grey means closed, however long ago.</span>
       <span class="wide nat-only" hidden>Each nation is coloured by the consultations in the current list that apply to it. UK-wide consultations count for every nation.</span>
     </div>
 
