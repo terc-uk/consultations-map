@@ -27,6 +27,8 @@
   let authorities = {}, caLayer, caLayersById = {}, lpaOutline, lpaGeo;
   // Consultations tERC has responded to: data/static/terc-responses.csv (edit on GitHub)
   let responses = [];
+  // "Only consultations tERC responded to" filter (local and combined authority views)
+  let respondedOnly = /[#&]responded=1\b/.test(location.hash);
 
   // ---------------------------------------------------------------- utils
   function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
@@ -73,7 +75,28 @@
     return { s, start, end, assumedEnd };
   }
 
+  // status of any consultation window, including ones closed more than 12 months ago
+  function anyStatus(w) {
+    const st = windowStatus(Object.assign({}, w, { predicted: false }));
+    return st || { s: "past", start: parse(w.start), end: parse(w.end) };
+  }
+
+  // with the responded filter on, an area is shaded only by consultations tERC responded to
+  // (closed ones of any age show as closed)
+  function respondedStatus(ref, windows) {
+    let best = "none";
+    for (const w of windows) {
+      if (!responseFor(ref, w)) continue;
+      let s = anyStatus(w).s;
+      if (s === "past") s = "recent";
+      if (RANK[s] > RANK[best]) best = s;
+    }
+    if (best === "none" && responses.some(r => r.plan === ref)) best = "recent";
+    return best;
+  }
+
   function planStatus(plan) {
+    if (respondedOnly) return respondedStatus(plan.reference, plan.consultations || []);
     let best = plan.events && plan.events.length ? "data" : "none";
     for (const w of plan.consultations || []) {
       const st = windowStatus(w);
@@ -83,7 +106,7 @@
   }
 
   function lpaStatus(feature) {
-    let best = feature.properties.plans.length ? "data" : "none";
+    let best = feature.properties.plans.length && !respondedOnly ? "data" : "none";
     for (const ref of feature.properties.plans) {
       const p = plans[ref];
       if (!p) continue;
@@ -265,6 +288,7 @@
   function caStatus(id) {
     const a = authorities[id];
     if (!a) return "none";
+    if (respondedOnly) return respondedStatus(id, a.windows);
     let best = "data";
     for (const w of sdsWindows(a, "sds")) {
       const st = windowStatus(w);
@@ -374,6 +398,7 @@
     document.querySelectorAll(".ca-only").forEach(s => { s.hidden = v !== "ca"; });
     document.querySelectorAll(".nat-only").forEach(s => { s.hidden = v !== "nat"; });
     document.querySelectorAll(".not-nat").forEach(s => { s.hidden = v === "nat"; });
+    document.querySelectorAll(".resp-only").forEach(s => { s.hidden = !respondedOnly || v === "nat"; });
     document.getElementById("predicted-toggle").hidden = v !== "lpa";
     document.getElementById("save-bar").hidden = !(v === "nat" && editing);
     const search = document.getElementById("search");
@@ -399,7 +424,8 @@
 
   function updateHash() {
     let h = "";
-    if (view === "ca") h = "#view=ca";
+    if (view === "ca") h = "#view=ca" + (respondedOnly ? "&responded=1" : "");
+    else if (view === "lpa" && respondedOnly) h = "#responded=1";
     else if (view === "nat") h = "#view=national" + (natShow && natShow !== defaultShow() ? "&show=" + natShow : "");
     history.replaceState(null, "", h || location.pathname + location.search);
   }
@@ -810,9 +836,10 @@
     if (view === "ca") {
       const el = document.getElementById("lists");
       if (!caLayer) { el.innerHTML = `<p class="loading">Loading combined authority data...</p>`; return; }
-      renderCaLists(el);
+      if (respondedOnly) renderRespondedLists(el); else renderCaLists(el);
       return;
     }
+    if (respondedOnly) { renderRespondedLists(document.getElementById("lists")); return; }
     const rows = collectWindows();
     const open = rows.filter(r => r.st.s === "open").sort((a, b) => a.st.end - b.st.end);
     const upcoming = rows.filter(r => r.st.s !== "open").sort((a, b) => a.st.start - b.st.start);
@@ -836,6 +863,65 @@
     el.querySelectorAll(".item[data-dev]").forEach(btn => {
       btn.addEventListener("click", () => focusDevolved(dev[Number(btn.dataset.dev)]));
     });
+  }
+
+  // ---- list of consultations tERC responded to, past ones included
+  function respondedRows() {
+    const rows = [], matched = new Set();
+    const add = (ref, w, item, ok) => {
+      const r = responseFor(ref, w);
+      if (!r) return;
+      matched.add(r);
+      if (ok) rows.push(Object.assign({ w, r, st: anyStatus(w) }, item));
+    };
+    for (const a of Object.values(authorities)) for (const w of a.windows) add(a.id, w, { a }, view === "ca" && caMatches(a));
+    for (const ref in plans) for (const w of plans[ref].consultations || []) add(ref, w, { p: plans[ref] }, view === "lpa" && matches(plans[ref]));
+    // responses recorded in the CSV that do not match a consultation in the data
+    for (const r of responses) {
+      if (matched.has(r)) continue;
+      const a = authorities[r.plan], p = plans[r.plan];
+      if (view === "ca" ? !a : a) continue;
+      if (view === "ca" ? !caMatches(a) : p ? !matches(p) : query && !norm(r.plan).includes(query)) continue;
+      rows.push({ a, p, r, w: { label: r.stage || "Consultation", start: r.start }, st: { s: "past" }, unmatched: true });
+    }
+    const key = x => x.r.responded || (x.w.end || x.w.start || "");
+    return rows.sort((x, y) => key(y).localeCompare(key(x)));
+  }
+
+  function respondedItemHtml(row, idx) {
+    const { a, p, w, st } = row;
+    const who = a ? a.name : p ? ((n => n.length ? (n.length > 2 ? `${n[0]} and ${n.length - 1} others` : n.join(" and ")) : p.name)(lpaNames(p))) : row.r.plan;
+    const what = a ? w.label : p ? `${w.label}: ${p.name}` : w.label;
+    let when;
+    if (row.unmatched) when = "Consultation dates not in the planning data";
+    else if (st.s === "open") when = `Open, closes ${fmt(w.end, w.precision)}`;
+    else if (st.s === "soon" || st.s === "later") when = `Opens ${fmt(w.start, w.precision)}`;
+    else when = w.start ? `${fmt(w.start, w.precision)} to ${w.end ? fmt(w.end, w.precision) : "closing date not given"}` : `Closed ${fmt(w.end, w.precision)}`;
+    const cls = st.s === "past" ? "recent" : st.s;
+    return `<button class="item ${cls}" data-ridx="${idx}">
+      <div class="who">${esc(who)}</div>
+      <div class="what">${esc(what)}</div>
+      <div class="when">${esc(when)}${respondedHtml(row.r)}</div></button>`;
+  }
+
+  function renderRespondedLists(el) {
+    const rows = respondedRows();
+    const label = view === "ca" ? "SDS consultations tERC responded to" : "Local plan consultations tERC responded to";
+    el.innerHTML = `<h2>${label} <span class="count">(${rows.length})</span></h2>` +
+      (rows.length ? rows.map(respondedItemHtml).join("")
+        : `<p class="empty">None found. Responses are recorded in data/static/terc-responses.csv.</p>`);
+    el.querySelectorAll(".item[data-ridx]").forEach(btn => btn.addEventListener("click", () => {
+      const row = rows[Number(btn.dataset.ridx)];
+      if (row.a) focusCa(row.a.id); else if (row.p) focusPlan(row.p);
+    }));
+  }
+
+  function setRespondedOnly(on) {
+    respondedOnly = on;
+    document.getElementById("responded-only").checked = on;
+    document.querySelectorAll(".resp-only").forEach(s => { s.hidden = !on || view === "nat"; });
+    updateHash();
+    refresh();
   }
 
   function focusPlan(plan) {
@@ -1060,6 +1146,8 @@
   if (view !== "lpa") setView(view);
 
   document.getElementById("predicted").addEventListener("change", e => { includePredicted = e.target.checked; refresh(); });
+  document.getElementById("responded-only").addEventListener("change", e => setRespondedOnly(e.target.checked));
+  if (respondedOnly) setRespondedOnly(true);
   let t;
   document.getElementById("search").addEventListener("input", e => {
     clearTimeout(t);

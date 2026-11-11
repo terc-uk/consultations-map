@@ -156,6 +156,11 @@ internal notes or links to private documents.
 
 ## Consultations tERC has responded to
 
+In the Local authorities and Combined authorities views, tick **Only consultations tERC responded
+to** to list every consultation with a recorded response, however long ago it closed, and shade only
+those areas on the map (link: `#responded=1`, or `#view=ca&responded=1`). Responses whose
+consultation dates are not in the planning data are still listed.
+
 This section covers local plans and spatial development strategies. National consultations use
 `national-terc.csv` instead (see above).
 
