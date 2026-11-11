@@ -114,21 +114,23 @@ offer a feed the fetcher can read. Each run looks back 120 days for recently clo
 and keeps anything it has seen before, so closed consultations stay listed for a year after they
 close (and for as long as tERC has them flagged). If one source fails, its earlier records are kept
 and the panel says which source was not refreshed. Consultations first seen in the last week are
-tagged "new".
+tagged "added this week".
 
-The list has three filters: **Relevant to tERC**, **All** and **Not relevant**. The map colours each
+The list has four filters: **New** (not reviewed yet), **Relevant**, **Not relevant** and **All**.
+The map colours each
 nation by the consultations in the current filter that apply to it (UK-wide ones count for all
 four), using the same colours as the other views.
 
-### Marking consultations as relevant, and recording responses
+### Reviewing consultations, and recording responses
 
-tERC's flags live in `data/static/national-terc.csv`. A consultation is relevant to tERC if it has
-a row in this file.
+tERC's review decisions live in `data/static/national-terc.csv`. A consultation with a row in this
+file has been reviewed; one without a row is "New".
 
 | Column | Meaning |
 |---|---|
 | `id` | The consultation's web address without `https://` and `www.`, for example `gov.uk/government/consultations/founders-relief-technical-consultation` |
 | `title` | The consultation title, to make the file readable (not used for matching) |
+| `status` | `relevant` or `not relevant` (blank counts as relevant) |
 | `responded` | Optional. Date tERC sent its response, as `YYYY-MM-DD`. Shows the "✓ tERC responded" tag |
 | `link` | Optional. A public link to the response, if tERC publishes it |
 
@@ -139,10 +141,12 @@ The easiest way to edit it is on the map itself:
    *Only select repositories* > `consultations-map`, and under **Repository permissions** set
    **Contents** to *Read and write*. Choose an expiry date. (An organisation owner may need to
    approve tokens for `terc-uk`.)
-2. On the map, open **National**, choose **All**, click **Edit tERC flags** and paste the token.
-   Tick "Remember on this browser" only on your own computer.
-3. Tick **Relevant to tERC** on the consultations that matter. To record a response, fill in the
-   **Responded** date (this also marks it as relevant).
+2. On the map, open **National**, click **Edit tERC flags** and paste the token. Tick "Remember
+   on this browser" only on your own computer. Editing opens on the **New** filter.
+3. Mark each consultation **Relevant** or **Not relevant** (choose **To review** to undo). Reviewed
+   ones fade and leave the New list when you save. Once you have picked out the relevant ones,
+   **Mark the ... still to review as not relevant** clears the rest in one go. To record a
+   response, fill in the **Responded** date (this also marks it as relevant).
 4. Click **Save to GitHub**. This commits the changes to `national-terc.csv` in one go; the public
    map shows them within a few minutes.
 

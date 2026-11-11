@@ -1,8 +1,8 @@
-id,title,responded,link
-yourviews.parliament.scot/329/hyper-scale-data-centres-short-survey,Hyperscale Data Centres - Short Survey,,
-yourviews.parliament.scot/329/hyperscale-data-centres-detailed-cfvs,Hyperscale Data Centres - Detailed Call for Evidence,,
-gov.wales/national-development-framework,National Development Framework,,
-gov.uk/government/consultations/modernising-corporate-reporting,Modernising corporate reporting,,
-gov.uk/government/consultations/draft-national-policy-statement-for-data-centres,Draft National Policy Statement for Data Centres,,
-gov.uk/government/consultations/environment-agency-consultation-on-a-resource-framework-for-aggregate-from-inert-waste,Environment Agency consultation on a Resource Framework for Aggregate from Inert Waste,,
-gov.wales/draft-wales-procurement-policy-statement,Draft Wales Procurement Policy Statement,,
+id,title,status,responded,link
+yourviews.parliament.scot/329/hyper-scale-data-centres-short-survey,Hyperscale Data Centres - Short Survey,relevant,,
+yourviews.parliament.scot/329/hyperscale-data-centres-detailed-cfvs,Hyperscale Data Centres - Detailed Call for Evidence,relevant,,
+gov.wales/national-development-framework,National Development Framework,relevant,,
+gov.uk/government/consultations/modernising-corporate-reporting,Modernising corporate reporting,relevant,,
+gov.uk/government/consultations/draft-national-policy-statement-for-data-centres,Draft National Policy Statement for Data Centres,relevant,,
+gov.uk/government/consultations/environment-agency-consultation-on-a-resource-framework-for-aggregate-from-inert-waste,Environment Agency consultation on a Resource Framework for Aggregate from Inert Waste,relevant,,
+gov.wales/draft-wales-procurement-policy-statement,Draft Wales Procurement Policy Statement,relevant,,

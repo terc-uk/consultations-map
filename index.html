@@ -25,16 +25,17 @@
       <p class="view-note ca-only" hidden>Spatial development strategy (SDS) consultations by combined, mayoral and strategic authorities.</p>
       <p class="view-note nat-only" hidden>Consultations and calls for evidence from the UK, Scottish, Welsh and Northern Ireland governments and from UK and Scottish Parliament committees. <span id="nat-meta"></span></p>
       <div class="filter-toggle nat-only" role="radiogroup" aria-label="Relevance to tERC" hidden>
-        <button type="button" role="radio" data-show="relevant" aria-checked="true">Relevant to tERC <span class="n"></span></button>
+        <button type="button" role="radio" data-show="new" aria-checked="false" title="Not reviewed yet">New <span class="n"></span></button>
+        <button type="button" role="radio" data-show="relevant" aria-checked="true" title="Reviewed: relevant to tERC">Relevant <span class="n"></span></button>
+        <button type="button" role="radio" data-show="not" aria-checked="false" title="Reviewed: not relevant to tERC">Not relevant <span class="n"></span></button>
         <button type="button" role="radio" data-show="all" aria-checked="false">All <span class="n"></span></button>
-        <button type="button" role="radio" data-show="not" aria-checked="false">Not relevant <span class="n"></span></button>
       </div>
       <input id="search" type="search" placeholder="Search council or plan" aria-label="Search council or plan">
       <label class="toggle" id="predicted-toggle"><input id="predicted" type="checkbox" checked> Include predicted dates</label>
       <div class="nat-only edit-entry" hidden>
         <button type="button" id="edit-start" class="linkish">Edit tERC flags</button>
         <form id="token-form" class="token-form" hidden>
-          <p>To tick consultations as relevant and record responses, paste a GitHub
+          <p>To review consultations and record responses, paste a GitHub
             <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>
             with access to this repository (<code>terc-uk/consultations-map</code>) only and <strong>Contents: Read and write</strong> permission.
             Changes are saved to <code>data/static/national-terc.csv</code>, which is public.</p>

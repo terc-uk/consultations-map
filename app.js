@@ -416,15 +416,19 @@
     return owner && repo ? `${owner}/${repo}` : "terc-uk/consultations-map";
   })();
   const BRANCH = "main", FLAGS_PATH = "data/static/national-terc.csv";
-  const FLAG_COLUMNS = ["id", "title", "responded", "link"];
+  const FLAG_COLUMNS = ["id", "title", "status", "responded", "link"];
   const NEW_DAYS = 7;
   const NATIONS = ["England", "Scotland", "Wales", "Northern Ireland"];
   let national = [], natFlags = {}, natLayer, natLayersByName = {}, natLoaded = false;
-  let natShow = (location.hash.match(/[#&]show=(relevant|all|not)\b/) || [])[1] || null;
+  let natShow = (location.hash.match(/[#&]show=(new|relevant|all|not)\b/) || [])[1] || null;
   let editing = false, pending = {}, token = null, flagsSha = null;
 
-  function defaultShow() { return Object.keys(natFlags).length ? "relevant" : "all"; }
+  function defaultShow() { return Object.values(natFlags).some(isRelevantRow) ? "relevant" : "all"; }
   function flagFor(id) { return id in pending ? pending[id] : natFlags[id]; }
+  // a row in national-terc.csv means the consultation has been reviewed; status says the outcome
+  // (rows from before the status column existed were all relevant ones)
+  function isRelevantRow(r) { return !!r && (r.responded || !/^not/i.test(r.status || "")); }
+  function reviewOf(id) { const f = flagFor(id); return !f ? "new" : isRelevantRow(f) ? "relevant" : "not"; }
 
   function natStatus(c) {
     const start = parse(c.start), end = parse(c.end);
@@ -458,8 +462,7 @@
   }
 
   function natPasses(c, show) {
-    const rel = !!flagFor(c.id);
-    return show === "all" || (show === "relevant" ? rel : !rel);
+    return show === "all" || reviewOf(c.id) === show;
   }
 
   // consultations in the current list: matching the search and relevance filter, not long closed
@@ -508,29 +511,28 @@
   }
 
   function natFlagHtml(c) {
-    const f = flagFor(c.id);
-    let html = "";
-    if (f && f.responded) {
-      html += respondedHtml(f);
-    } else if (f && natShow !== "relevant") {
-      html += ` <span class="badge rel">tERC relevant</span>`;
-    }
-    return html;
+    const f = flagFor(c.id), review = reviewOf(c.id);
+    if (f && f.responded) return respondedHtml(f);
+    if (review === natShow) return "";
+    if (review === "relevant") return ` <span class="badge rel">tERC relevant</span>`;
+    if (review === "not") return ` <span class="badge notrel">not relevant</span>`;
+    return natShow === "all" ? ` <span class="badge torev">to review</span>` : "";
   }
 
   function natEditHtml(c) {
     if (!editing) return "";
-    const f = flagFor(c.id);
+    const f = flagFor(c.id), review = reviewOf(c.id), id = esc(c.id);
+    const opt = (v, label) => `<label><input type="radio" name="rv-${id}" value="${v}" data-review="${id}"${review === v ? " checked" : ""}> ${label}</label>`;
     return `<div class="edit-row">
-      <label><input type="checkbox" data-rel="${esc(c.id)}"${f ? " checked" : ""}> Relevant to tERC</label>
-      <label>Responded <input type="date" data-resp="${esc(c.id)}" value="${esc((f && f.responded) || "")}"></label></div>`;
+      <span class="review" role="radiogroup" aria-label="Review">${opt("new", "To review")}${opt("relevant", "Relevant")}${opt("not", "Not relevant")}</span>
+      <label>Responded <input type="date" data-resp="${id}" value="${esc((f && f.responded) || "")}"></label></div>`;
   }
 
   function natItemHtml({ c, st }) {
     const url = safeUrl(c.url);
     const isNew = c.first_seen && daysBetween(parse(c.first_seen), today) <= NEW_DAYS;
-    return `<div class="item nat ${st.s}${flagFor(c.id) ? " flagged" : ""}" data-nat="${esc(c.id)}">
-      <div class="who">${esc(c.org || c.source)}${nationTags(c)}${isNew ? '<span class="badge new">new</span>' : ""}</div>
+    return `<div class="item nat ${st.s} rv-${reviewOf(c.id)}" data-nat="${esc(c.id)}">
+      <div class="who">${esc(c.org || c.source)}${nationTags(c)}${isNew ? '<span class="badge new">added this week</span>' : ""}</div>
       <div class="what">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}
         <span class="kind">${esc(c.kind || "")}</span></div>
       <div class="when">${esc(natWhen(c, st))}<span class="flag">${natFlagHtml(c)}</span></div>
@@ -540,11 +542,7 @@
   function renderNatLists(el) {
     if (!natLoaded) { el.innerHTML = `<p class="loading">Loading national consultations...</p>`; return; }
     if (!natShow) natShow = defaultShow();
-    // counts on the filter buttons
-    for (const b of document.querySelectorAll(".filter-toggle button")) {
-      b.setAttribute("aria-checked", String(b.dataset.show === natShow));
-      b.querySelector(".n").textContent = `(${natRows(b.dataset.show).length})`;
-    }
+    updateFilterCounts();
     const rows = natRows();
     const endKey = r => (r.st.end ? +r.st.end : Infinity);
     const open = rows.filter(r => r.st.s === "open").sort((a, b) => endKey(a) - endKey(b));
@@ -553,9 +551,12 @@
     const recent = rows.filter(r => r.st.s === "recent")
       .sort((a, b) => (+(b.st.end || b.st.ref || 0)) - (+(a.st.end || a.st.ref || 0)));
     const list = l => l.length ? l.map(natItemHtml).join("") : `<p class="empty">None found.</p>`;
-    const empty = natShow === "relevant" && !Object.keys(natFlags).length && !editing
+    const empty = natShow === "relevant" && !Object.values(natFlags).some(isRelevantRow) && !editing
       ? `<p class="empty">No consultations have been marked as relevant to tERC yet. Choose "All" to see everything.</p>` : "";
-    el.innerHTML = empty +
+    const left = editing && natShow === "new" ? rows.filter(r => reviewOf(r.c.id) === "new").length : 0;
+    const bulk = left ? `<div class="bulk"><button type="button" class="linkish" id="bulk-not">Mark the ${left} still to review as not relevant</button>
+      <span class="d">(includes closed ones; nothing is saved until you press Save)</span></div>` : "";
+    el.innerHTML = empty + bulk +
       `<h2>Open now <span class="count">(${open.length})</span></h2>` + list(open) +
       `<h2>Coming up <span class="count">(${upcoming.length})</span></h2>` + list(upcoming) +
       `<details class="closed-list"><summary><h2>Closed in the last 12 months <span class="count">(${recent.length})</span></h2></summary></details>`;
@@ -565,11 +566,20 @@
     });
   }
 
+  function updateFilterCounts() {
+    for (const b of document.querySelectorAll(".filter-toggle button")) {
+      b.setAttribute("aria-checked", String(b.dataset.show === natShow));
+      b.querySelector(".n").textContent = `(${natRows(b.dataset.show).length})`;
+    }
+    const bulk = document.getElementById("bulk-not");
+    if (bulk) bulk.textContent = `Mark the ${natRows("new").length} still to review as not relevant`;
+  }
+
   function natPopupHtml(feature) {
     const name = feature.properties.name;
     const rows = natRows().filter(r => appliesTo(r.c, name) && r.st.s !== "recent")
       .sort((a, b) => (a.st.end ? +a.st.end : Infinity) - (b.st.end ? +b.st.end : Infinity));
-    const label = { relevant: "relevant to tERC", all: "", not: "not marked relevant" }[natShow];
+    const label = { new: "still to review", relevant: "relevant to tERC", all: "", not: "not relevant" }[natShow];
     let html = `<div class="pop"><h3>${esc(name)}</h3><div class="facts">${rows.length} open or upcoming ${label} consultation${rows.length === 1 ? "" : "s"} that apply here, including UK-wide ones.</div><ul>`;
     for (const { c, st } of rows.slice(0, 25)) {
       const url = safeUrl(c.url);
@@ -638,6 +648,8 @@
     const rows = await loadFlagsFromGitHub();  // also checks the token can read the repository
     setFlags(rows);
     editing = true; pending = {};
+    natShow = "new";  // start with the consultations still to review
+    updateHash();
     document.getElementById("token-form").hidden = true;
     document.getElementById("edit-start").hidden = true;
     document.getElementById("save-bar").hidden = false;
@@ -665,24 +677,46 @@
     const n = Object.keys(pending).length;
     const status = document.getElementById("save-status");
     delete status.dataset.confirm;
-    status.textContent = msg || (n ? `${n} unsaved change${n === 1 ? "" : "s"}` : "Tick consultations that are relevant to tERC.");
+    status.textContent = msg || (n ? `${n} unsaved change${n === 1 ? "" : "s"}` : "Mark each consultation as relevant or not relevant to tERC.");
     document.getElementById("save-btn").disabled = !n;
     document.getElementById("discard-btn").hidden = !n;
   }
 
-  function setPending(id, row) {
+  function setPending(id, row, quiet) {
     const before = natFlags[id];
-    const same = (!before && !row) || (before && row && before.responded === row.responded && (before.link || "") === (row.link || ""));
-    if (same) delete pending[id]; else pending[id] = row;
+    const key = r => (r ? [isRelevantRow(r), r.responded || "", r.link || ""].join("|") : "");
+    if (key(before) === key(row)) delete pending[id]; else pending[id] = row;
+    if (quiet) return;
     updateSaveBar();
-    const c = national.find(x => x.id === id);
+    updateFilterCounts();
+    const c = national.find(x => x.id === id), review = reviewOf(id);
     document.querySelectorAll(`.item.nat[data-nat="${CSS.escape(id)}"]`).forEach(el => {
-      el.classList.toggle("flagged", !!row);
+      el.classList.remove("rv-new", "rv-relevant", "rv-not");
+      el.classList.add("rv-" + review);
+      el.classList.toggle("moved", natShow !== "all" && review !== natShow);  // leaves this filter on the next refresh
       const f = el.querySelector(".flag"); if (f && c) f.innerHTML = natFlagHtml(c);
-      const box = el.querySelector("input[data-rel]"); if (box) box.checked = !!row;
+      el.querySelectorAll("input[data-review]").forEach(r => { r.checked = r.value === review; });
       const d = el.querySelector("input[data-resp]"); if (d) d.value = (row && row.responded) || "";
     });
     if (natLayer) natLayer.setStyle(natStyle);
+  }
+
+  function reviewRow(id, review, responded) {
+    if (review === "new") return null;
+    const c = national.find(x => x.id === id);
+    const row = Object.assign({ id, title: c ? c.title : "", responded: "", link: "" }, flagFor(id) || {});
+    row.status = review === "relevant" ? "relevant" : "not relevant";
+    if (responded !== undefined) row.responded = responded;
+    if (review === "not") row.responded = "";
+    return row;
+  }
+
+  function markRestNotRelevant() {
+    for (const { c } of natRows("new")) {
+      if (reviewOf(c.id) === "new") setPending(c.id, reviewRow(c.id, "not"), true);
+    }
+    updateSaveBar();
+    refresh();
   }
 
   async function saveFlags() {
@@ -696,7 +730,7 @@
         if (row) byId.set(id, Object.assign(byId.get(id) || {}, row));
         else byId.delete(id);
       }
-      const rows = [...byId.values()];
+      const rows = [...byId.values()].map(r => Object.assign(r, { status: isRelevantRow(r) ? "relevant" : "not relevant" }));
       const n = Object.keys(pending).length;
       const body = { message: `Update tERC flags on ${n} national consultation${n === 1 ? "" : "s"}`, content: b64encode(toCsv(rows)), branch: BRANCH };
       if (flagsSha) body.sha = flagsSha;
@@ -715,14 +749,12 @@
   function onListChange(e) {
     const t = e.target;
     if (!editing) return;
-    if (t.matches("input[data-rel]")) {
-      const id = t.dataset.rel, c = national.find(x => x.id === id);
-      setPending(id, t.checked ? Object.assign({ id, title: c ? c.title : "", responded: "", link: "" }, flagFor(id) || {}) : null);
+    if (t.matches("input[data-review]")) {
+      setPending(t.dataset.review, reviewRow(t.dataset.review, t.value));
     } else if (t.matches("input[data-resp]")) {
-      const id = t.dataset.resp, c = national.find(x => x.id === id);
-      const row = Object.assign({ id, title: c ? c.title : "", responded: "", link: "" }, flagFor(id) || {});
-      row.responded = t.value || "";
-      setPending(id, row);  // recording a response also marks the consultation as relevant
+      const id = t.dataset.resp;
+      if (t.value) setPending(id, reviewRow(id, "relevant", t.value));  // a response means it is relevant
+      else if (flagFor(id)) setPending(id, reviewRow(id, reviewOf(id), ""));
     }
   }
 
@@ -979,6 +1011,7 @@
   // national list: edit controls and map highlighting
   const listsEl = document.getElementById("lists");
   listsEl.addEventListener("change", onListChange);
+  listsEl.addEventListener("click", e => { if (e.target.id === "bulk-not") markRestNotRelevant(); });
   listsEl.addEventListener("mouseover", e => {
     const el = e.target.closest(".item.nat");
     if (el && el.dataset.nat !== listsEl.dataset.hover) {
