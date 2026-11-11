@@ -554,7 +554,9 @@ def load_previous():
 def load_flagged():
     try:
         with open(FLAGS_FILE, newline="", encoding="utf-8-sig") as f:
-            return {make_id(r.get("id", "")) for r in csv.DictReader(f) if r.get("id")}
+            # keep relevant ones (and any with a response) for good; "not relevant" ones age out as usual
+            return {make_id(r["id"]) for r in csv.DictReader(f)
+                    if r.get("id") and (r.get("responded") or not (r.get("status") or "").lower().startswith("not"))}
     except OSError:
         return set()
 
