@@ -197,6 +197,65 @@
       (!r.stage || norm(r.stage) === norm(w.stage) || norm(r.stage) === norm(w.label)) &&
       (!r.start || r.start === w.start));
   }
+  // ---- editing responses (in edit mode, saved to terc-responses.csv through the GitHub API)
+  const RESP_PATH = "data/static/terc-responses.csv";
+  const RESP_COLUMNS = ["plan", "stage", "start", "responded", "link"];
+  let respSaved = [], respSha = null;
+  function respIdentity(r) { return [r.plan, norm(r.stage), r.start || ""].join("|"); }
+  function winList(src, ref) {
+    const x = src === "a" ? authorities[ref] : plans[ref];
+    return x ? (src === "a" ? x.windows : x.consultations || []) : [];
+  }
+  function respKey(src, ref, w) { return `${src}|${ref}|${winList(src, ref).indexOf(w)}`; }
+  // the badge, wrapped so it can be updated in place while editing
+  function respBadge(src, ref, w) {
+    return `<span class="rb" data-rk="${esc(respKey(src, ref, w))}">${respondedHtml(responseFor(ref, w))}</span>`;
+  }
+  function respEditHtml(src, ref, w) {
+    if (!editing) return "";
+    const r = responseFor(ref, w);
+    return `<div class="edit-row resp-edit"><label>tERC responded <input type="date" data-rk="${esc(respKey(src, ref, w))}" value="${esc((r && r.responded) || "")}"></label></div>`;
+  }
+  function setResponse(src, ref, w, date) {
+    const existing = responseFor(ref, w);
+    if (existing) {
+      const i = responses.indexOf(existing);
+      if (date) responses[i] = Object.assign({}, existing, { responded: date });
+      else responses.splice(i, 1);
+    } else if (date) {
+      // the start date is only needed to tell apart two consultations with the same name
+      const twin = winList(src, ref).some(x => x !== w && x.label === w.label);
+      responses.push({ plan: ref, stage: w.label, start: twin ? w.start || "" : "", responded: date, link: "" });
+    }
+  }
+  function respDiff() {
+    const saved = new Map(respSaved.map(r => [respIdentity(r), r]));
+    const work = new Map(responses.map(r => [respIdentity(r), r]));
+    const out = [];
+    for (const k of new Set([...saved.keys(), ...work.keys()])) {
+      const a = saved.get(k), b = work.get(k);
+      if (!a || !b || a.responded !== b.responded || (a.link || "") !== (b.link || "")) out.push([k, b || null]);
+    }
+    return out;
+  }
+  function onResponseInput(t) {
+    const val = t.value || "";
+    if (t.dataset.rid !== undefined) {  // a recorded response not matched to dates in the data
+      const i = responses.findIndex(r => respIdentity(r) === t.dataset.rid);
+      if (i >= 0) { if (val) responses[i] = Object.assign({}, responses[i], { responded: val }); else responses.splice(i, 1); }
+    } else {
+      const [src, ref, idx] = t.dataset.rk.split("|");
+      const w = winList(src, ref)[Number(idx)];
+      if (!w) return;
+      setResponse(src, ref, w, val);
+      document.querySelectorAll(`.rb[data-rk="${CSS.escape(t.dataset.rk)}"]`).forEach(el => { el.innerHTML = respondedHtml(responseFor(ref, w)); });
+      document.querySelectorAll(`input[data-rk="${CSS.escape(t.dataset.rk)}"]`).forEach(el => { if (el !== t) el.value = val; });
+    }
+    updateSaveBar();
+    if (lpaLayer) lpaLayer.setStyle(style);
+    if (caLayer) caLayer.setStyle(caStyle);
+  }
+
   function respondedHtml(r) {
     if (!r) return "";
     const text = `\u2713 tERC responded${r.responded ? " " + fmt(r.responded) : ""}`;
@@ -225,7 +284,7 @@
     };
   }
 
-  function windowLine(w, ref) {
+  function windowLine(w, ref, src) {
     const st = windowStatus(w);
     if (!st && w.predicted && !includePredicted) return "";
     const badge = st && st.s !== "past" ? `<span class="badge ${st.s}">${{
@@ -238,7 +297,7 @@
     const note = w.note ? ` <span class="d">&middot; ${esc(w.note)}</span>` : "";
     const url = safeUrl(w.url);
     const label = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(w.label)}</a>` : esc(w.label);
-    return `<li>${label}${badge}<br><span class="d">${esc(span)}</span>${pred}${note}${respondedHtml(responseFor(ref, w))}</li>`;
+    return `<li>${label}${badge}<br><span class="d">${esc(span)}</span>${pred}${note}${respBadge(src || "p", ref, w)}${respEditHtml(src || "p", ref, w)}</li>`;
   }
 
   function popupHtml(feature) {
@@ -315,13 +374,13 @@
     if (a.authority_type) html += `<div class="facts">${esc(a.authority_type)}</div>`;
     html += `<div class="plan"><h4>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(a.sds_name)}</a>` : esc(a.sds_name || "Spatial development strategy")}</h4>`;
     if (a.status) html += `<div class="facts">${esc(a.status)}</div>`;
-    const lines = sdsWindows(a, "sds").map(w => windowLine(w, id)).filter(Boolean);
+    const lines = sdsWindows(a, "sds").map(w => windowLine(w, id, "a")).filter(Boolean);
     if (lines.length) html += `<ul>${lines.join("")}</ul>`;
     else if (!a.status) html += `<div class="none">No SDS consultation dates published.</div>`;
     if (a.next_step) html += `<div class="facts" style="margin-top:6px"><strong>Next:</strong> ${esc(a.next_step)}</div>`;
     if (a.note) html += `<div class="facts">${esc(a.note)}</div>`;
     html += `</div>`;
-    const related = sdsWindows(a, "related").map(w => windowLine(w, id)).filter(Boolean);
+    const related = sdsWindows(a, "related").map(w => windowLine(w, id, "a")).filter(Boolean);
     if (related.length) html += `<div class="related-h">Related strategic plan</div><ul>${related.join("")}</ul>`;
     const names = feature.properties.member_names || [];
     if (names.length) {
@@ -350,7 +409,7 @@
     return `<button class="item ${st.s}${w.kind === "related" ? " related" : ""}" data-ca="${esc(a.id)}" data-idx="${idx}">
       <div class="who">${esc(a.name)}</div>
       <div class="what">${esc(w.label)}</div>
-      <div class="when">${esc(when)}${respondedHtml(responseFor(a.id, w))}</div></button>`;
+      <div class="when">${esc(when)}${respBadge("a", a.id, w)}</div></button>${respEditHtml("a", a.id, w)}`;
   }
 
   function renderCaLists(el) {
@@ -400,7 +459,8 @@
     document.querySelectorAll(".not-nat").forEach(s => { s.hidden = v === "nat"; });
     document.querySelectorAll(".resp-only").forEach(s => { s.hidden = !respondedOnly || v === "nat"; });
     document.getElementById("predicted-toggle").hidden = v !== "lpa";
-    document.getElementById("save-bar").hidden = !(v === "nat" && editing);
+    document.getElementById("save-bar").hidden = !editing;
+    if (editing) updateSaveBar();
     const search = document.getElementById("search");
     search.placeholder = SEARCH_LABELS[v];
     search.setAttribute("aria-label", search.placeholder);
@@ -669,12 +729,24 @@
     try { sessionStorage.removeItem("terc-gh-token"); localStorage.removeItem("terc-gh-token"); } catch (e) { /* ignore */ }
   }
 
+  async function loadResponsesFromGitHub() {
+    const file = await gh(`contents/${RESP_PATH}?ref=${BRANCH}`);
+    respSha = file ? file.sha : null;
+    return file ? parseCsv(b64decode(file.content)).filter(r => r.plan) : [];
+  }
+  function respToCsv(rows) {
+    return [RESP_COLUMNS.join(","), ...rows.map(r => RESP_COLUMNS.map(k => csvField(r[k])).join(","))].join("\n") + "\n";
+  }
+  function totalPending() { return Object.keys(pending).length + respDiff().length; }
+
   async function startEditing(t) {
     token = t;
     const rows = await loadFlagsFromGitHub();  // also checks the token can read the repository
     setFlags(rows);
+    respSaved = await loadResponsesFromGitHub();
+    responses = respSaved.map(r => Object.assign({}, r));
     editing = true; pending = {};
-    natShow = "new";  // start with the consultations still to review
+    if (view === "nat") natShow = "new";  // start with the consultations still to review
     updateHash();
     document.getElementById("token-form").hidden = true;
     document.getElementById("edit-start").hidden = true;
@@ -684,8 +756,9 @@
   }
 
   function stopEditing() {
-    if (Object.keys(pending).length && !confirmDiscard()) return;
-    editing = false; pending = {}; token = null;
+    if (totalPending() && !confirmDiscard()) return;
+    discardChanges();
+    editing = false; token = null;
     document.getElementById("save-bar").hidden = true;
     document.getElementById("edit-start").hidden = false;
     refresh();
@@ -699,11 +772,18 @@
     return false;
   }
 
+  function discardChanges() {
+    pending = {};
+    responses = respSaved.map(r => Object.assign({}, r));
+  }
+
   function updateSaveBar(msg) {
-    const n = Object.keys(pending).length;
+    const n = totalPending();
     const status = document.getElementById("save-status");
     delete status.dataset.confirm;
-    status.textContent = msg || (n ? `${n} unsaved change${n === 1 ? "" : "s"}` : "Mark each consultation as relevant or not relevant to tERC.");
+    const hint = view === "nat" ? "Mark each consultation as relevant or not relevant to tERC."
+      : "Enter the date tERC responded on any consultation, including closed ones.";
+    status.textContent = msg || (n ? `${n} unsaved change${n === 1 ? "" : "s"}` : hint);
     document.getElementById("save-btn").disabled = !n;
     document.getElementById("discard-btn").hidden = !n;
   }
@@ -745,25 +825,13 @@
     refresh();
   }
 
-  async function saveFlags() {
+  async function saveAll() {
     const btn = document.getElementById("save-btn");
     btn.disabled = true;
     updateSaveBar("Saving...");
     try {
-      const latest = await loadFlagsFromGitHub();  // merge into the latest file so nothing is overwritten
-      const byId = new Map(latest.map(r => [r.id, r]));
-      for (const [id, row] of Object.entries(pending)) {
-        if (row) byId.set(id, Object.assign(byId.get(id) || {}, row));
-        else byId.delete(id);
-      }
-      const rows = [...byId.values()].map(r => Object.assign(r, { status: isRelevantRow(r) ? "relevant" : "not relevant" }));
-      const n = Object.keys(pending).length;
-      const body = { message: `Update tERC flags on ${n} national consultation${n === 1 ? "" : "s"}`, content: b64encode(toCsv(rows)), branch: BRANCH };
-      if (flagsSha) body.sha = flagsSha;
-      const res = await gh(`contents/${FLAGS_PATH}`, { method: "PUT", body: JSON.stringify(body) });
-      flagsSha = res && res.content ? res.content.sha : null;
-      setFlags(rows);
-      pending = {};
+      if (Object.keys(pending).length) await saveFlags();
+      if (respDiff().length) await saveResponses();
       updateSaveBar("Saved. The public map updates within a few minutes.");
       refresh();
     } catch (err) {
@@ -772,10 +840,47 @@
     }
   }
 
+  async function saveResponses() {
+    const changes = respDiff();
+    const latest = await loadResponsesFromGitHub();  // merge into the latest file so nothing is overwritten
+    const byId = new Map(latest.map(r => [respIdentity(r), r]));
+    for (const [k, row] of changes) {
+      if (row) byId.set(k, Object.assign(byId.get(k) || {}, row));
+      else byId.delete(k);
+    }
+    const rows = [...byId.values()];
+    const n = changes.length;
+    const body = { message: `Record tERC responses (${n} change${n === 1 ? "" : "s"})`, content: b64encode(respToCsv(rows)), branch: BRANCH };
+    if (respSha) body.sha = respSha;
+    const res = await gh(`contents/${RESP_PATH}`, { method: "PUT", body: JSON.stringify(body) });
+    respSha = res && res.content ? res.content.sha : null;
+    respSaved = rows.map(r => Object.assign({}, r));
+    responses = rows.map(r => Object.assign({}, r));
+  }
+
+  async function saveFlags() {
+    const latest = await loadFlagsFromGitHub();  // merge into the latest file so nothing is overwritten
+    const byId = new Map(latest.map(r => [r.id, r]));
+    for (const [id, row] of Object.entries(pending)) {
+      if (row) byId.set(id, Object.assign(byId.get(id) || {}, row));
+      else byId.delete(id);
+    }
+    const rows = [...byId.values()].map(r => Object.assign(r, { status: isRelevantRow(r) ? "relevant" : "not relevant" }));
+    const n = Object.keys(pending).length;
+    const body = { message: `Update tERC flags on ${n} national consultation${n === 1 ? "" : "s"}`, content: b64encode(toCsv(rows)), branch: BRANCH };
+    if (flagsSha) body.sha = flagsSha;
+    const res = await gh(`contents/${FLAGS_PATH}`, { method: "PUT", body: JSON.stringify(body) });
+    flagsSha = res && res.content ? res.content.sha : null;
+    setFlags(rows);
+    pending = {};
+  }
+
   function onListChange(e) {
     const t = e.target;
     if (!editing) return;
-    if (t.matches("input[data-review]")) {
+    if (t.matches("input[data-rk], input[data-rid]")) {
+      onResponseInput(t);
+    } else if (t.matches("input[data-review]")) {
       setPending(t.dataset.review, reviewRow(t.dataset.review, t.value));
     } else if (t.matches("input[data-resp]")) {
       const id = t.dataset.resp;
@@ -802,7 +907,7 @@
       for (const w of p.consultations || []) {
         const st = windowStatus(w);
         if (!st) continue;
-        if (st.s === "open" || ((st.s === "soon" || st.s === "later") && daysBetween(today, st.start) <= LIST_AHEAD_DAYS)) {
+        if (st.s === "open" || st.s === "recent" || ((st.s === "soon" || st.s === "later") && daysBetween(today, st.start) <= LIST_AHEAD_DAYS)) {
           rows.push({ p, w, st });
         }
       }
@@ -818,13 +923,16 @@
       const left = daysBetween(today, st.end);
       when = st.assumedEnd ? `Opened ${fmt(w.start, w.precision)}, closing date not given`
         : `Closes ${fmt(w.end, w.precision)} (${left === 0 ? "today" : left === 1 ? "1 day left" : left + " days left"})`;
+    } else if (st.s === "recent") {
+      when = !w.start ? `Closed ${fmt(w.end, w.precision)}`
+        : `${fmt(w.start, w.precision)} to ${st.assumedEnd ? "closing date not given" : fmt(w.end, w.precision)}`;
     } else {
       when = `Opens ${fmt(w.start, w.precision)}${w.end ? ", closes " + fmt(w.end, w.precision) : ""}`;
     }
     return `<button class="item ${st.s}" data-idx="${idx}">
       <div class="who">${esc(whoText)}${w.predicted ? '<span class="badge">predicted</span>' : ""}</div>
       <div class="what">${esc(w.label)}: ${esc(p.name)}</div>
-      <div class="when">${esc(when)}${respondedHtml(responseFor(p.reference, w))}</div></button>`;
+      <div class="when">${esc(when)}${respBadge("p", p.reference, w)}</div></button>${respEditHtml("p", p.reference, w)}`;
   }
 
   function renderLists() {
@@ -842,14 +950,17 @@
     if (respondedOnly) { renderRespondedLists(document.getElementById("lists")); return; }
     const rows = collectWindows();
     const open = rows.filter(r => r.st.s === "open").sort((a, b) => a.st.end - b.st.end);
-    const upcoming = rows.filter(r => r.st.s !== "open").sort((a, b) => a.st.start - b.st.start);
-    const all = open.concat(upcoming);
+    const upcoming = rows.filter(r => r.st.s === "soon" || r.st.s === "later").sort((a, b) => a.st.start - b.st.start);
+    const recent = rows.filter(r => r.st.s === "recent").sort((a, b) => b.st.end - a.st.end);
+    const all = open.concat(upcoming, recent);
     const el = document.getElementById("lists");
     el.innerHTML =
       `<h2>Open now <span class="count">(${open.length})</span></h2>` +
       (open.length ? open.map(r => itemHtml(r, all.indexOf(r))).join("") : `<p class="empty">None found.</p>`) +
       `<h2>Coming up in the next 12 months <span class="count">(${upcoming.length})</span></h2>` +
-      (upcoming.length ? upcoming.map(r => itemHtml(r, all.indexOf(r))).join("") : `<p class="empty">None found.</p>`);
+      (upcoming.length ? upcoming.map(r => itemHtml(r, all.indexOf(r))).join("") : `<p class="empty">None found.</p>`) +
+      `<details class="closed-list"${editing ? " open" : ""}><summary><h2>Closed in the last 12 months <span class="count">(${recent.length})</span></h2></summary>` +
+      (recent.length ? recent.map(r => itemHtml(r, all.indexOf(r))).join("") : `<p class="empty">None found.</p>`) + `</details>`;
     const dev = devolvedMatches();
     if (dev.length) {
       el.innerHTML += `<h2>Scotland and Wales <span class="count">(${dev.length})</span></h2>` +
@@ -901,7 +1012,10 @@
     return `<button class="item ${cls}" data-ridx="${idx}">
       <div class="who">${esc(who)}</div>
       <div class="what">${esc(what)}</div>
-      <div class="when">${esc(when)}${respondedHtml(row.r)}</div></button>`;
+      <div class="when">${esc(when)}${row.unmatched ? respondedHtml(row.r) : respBadge(a ? "a" : "p", a ? a.id : p.reference, w)}</div></button>` +
+      (!editing ? "" : row.unmatched
+        ? `<div class="edit-row resp-edit"><label>tERC responded <input type="date" data-rid="${esc(respIdentity(row.r))}" value="${esc(row.r.responded || "")}"></label></div>`
+        : respEditHtml(a ? "a" : "p", a ? a.id : p.reference, w));
   }
 
   function renderRespondedLists(el) {
@@ -1043,7 +1157,7 @@
 
   fetch("data/static/terc-responses.csv")
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-    .then(text => { responses = parseCsv(text).filter(r => r.plan); renderLists(); })
+    .then(text => { if (!editing) { responses = parseCsv(text).filter(r => r.plan); renderLists(); } })
     .catch(err => console.warn("tERC responses not loaded:", err));
 
   Promise.all([
@@ -1138,10 +1252,12 @@
       tokenError.hidden = false;
     });
   });
-  document.getElementById("save-btn").addEventListener("click", saveFlags);
-  document.getElementById("discard-btn").addEventListener("click", () => { pending = {}; updateSaveBar(); refresh(); });
+  document.getElementById("save-btn").addEventListener("click", saveAll);
+  document.getElementById("discard-btn").addEventListener("click", () => { discardChanges(); updateSaveBar(); refresh(); });
+  // response date boxes in map popups
+  document.getElementById("map").addEventListener("change", onListChange);
   document.getElementById("edit-stop").addEventListener("click", stopEditing);
-  window.addEventListener("beforeunload", e => { if (editing && Object.keys(pending).length) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("beforeunload", e => { if (editing && totalPending()) { e.preventDefault(); e.returnValue = ""; } });
 
   if (view !== "lpa") setView(view);
 

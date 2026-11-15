@@ -161,6 +161,11 @@ to** to list every consultation with a recorded response, however long ago it cl
 those areas on the map (link: `#responded=1`, or `#view=ca&responded=1`). Responses whose
 consultation dates are not in the planning data are still listed.
 
+You can also record responses on the map: click **Edit tERC flags** (same GitHub token as the
+national view), and every local plan and SDS consultation gets a **tERC responded** date box, in
+the list (which then also shows consultations closed in the last 12 months) and in the map pop-ups.
+Clearing a date removes the response. **Save to GitHub** writes `terc-responses.csv` in one commit.
+
 This section covers local plans and spatial development strategies. National consultations use
 `national-terc.csv` instead (see above).
 
